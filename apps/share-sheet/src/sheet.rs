@@ -51,6 +51,9 @@ struct Sheet {
     tiles: RefCell<HashMap<String, Tile>>,
     flows: RefCell<Vec<(gtk::FlowBox, Vec<String>)>>,
     jobs: RefCell<Vec<(String, JobRow)>>,
+    /// Updates for jobs that arrived before their row existed: a quick job can
+    /// finish before `Choose` has even returned.
+    early: RefCell<HashMap<String, Job>>,
     show_hidden: Cell<bool>,
     closed: Cell<bool>,
 }
@@ -169,6 +172,7 @@ fn build(app: &gtk::Application, conn: Arc<Conn>, info: RequestInfo) {
         tiles: RefCell::default(),
         flows: RefCell::default(),
         jobs: RefCell::default(),
+        early: RefCell::default(),
         show_hidden: Cell::new(false),
         closed: Cell::new(false),
     });
@@ -733,6 +737,10 @@ impl Sheet {
                 let Some(sheet) = weak.upgrade() else { return };
                 match result {
                     Ok(job) => {
+                        let job = match sheet.early.borrow_mut().remove(&job.id) {
+                            Some(seen) if newer(&seen, &job) => seen,
+                            _ => job,
+                        };
                         sheet.add_job(&job, d, options);
                         sheet.job_changed(&job);
                     }
@@ -808,7 +816,21 @@ impl Sheet {
 
     fn job_changed(self: &Rc<Self>, job: &Job) {
         let mut jobs = self.jobs.borrow_mut();
-        let Some((_, row)) = jobs.iter_mut().find(|(id, _)| *id == job.id) else { return };
+        let Some((_, row)) = jobs.iter_mut().find(|(id, _)| *id == job.id) else {
+            // Possibly ours, from a Choose that hasn't returned yet.
+            let mut early = self.early.borrow_mut();
+            // Other windows' jobs pass through here too.
+            if early.len() > 64 {
+                early.clear();
+            }
+            if early.get(&job.id).is_none_or(|seen| newer(job, seen)) {
+                early.insert(job.id.clone(), job.clone());
+            }
+            return;
+        };
+        if row.finished && !job.state.finished() {
+            return;
+        }
         let d = row.destination.clone();
         let tile_state = match job.state {
             JobState::Queued | JobState::Running => tile::State::Busy(job.fraction()),
@@ -905,6 +927,15 @@ impl Sheet {
     }
 }
 
+/// Whether update `a` comes after `b` for the same job.
+fn newer(a: &Job, b: &Job) -> bool {
+    match (a.state.finished(), b.state.finished()) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => a.bytes_done >= b.bytes_done,
+    }
+}
+
 fn job_title(job: &Job, d: &Destination, options: &str) -> String {
     match job.state {
         JobState::Completed => job.message.clone().unwrap_or_else(|| "Done".into()),
@@ -955,5 +986,34 @@ fn job_caption(job: &Job, started: Instant) -> String {
             parts.join(" · ")
         }
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn job(state: JobState, done: u64) -> Job {
+        Job {
+            id: "j".into(),
+            destination: "save".into(),
+            destination_name: "Save to folder".into(),
+            state,
+            items: 1,
+            bytes_done: done,
+            bytes_total: 10,
+            message: None,
+            outputs: Vec::new(),
+            created: 0,
+            updated: 0,
+        }
+    }
+
+    #[test]
+    fn a_finished_update_beats_the_snapshot_taken_after_choose() {
+        assert!(newer(&job(JobState::Completed, 10), &job(JobState::Running, 0)));
+        assert!(!newer(&job(JobState::Running, 0), &job(JobState::Completed, 10)));
+        assert!(newer(&job(JobState::Running, 6), &job(JobState::Running, 2)));
+        assert!(!newer(&job(JobState::Running, 2), &job(JobState::Running, 6)));
     }
 }
