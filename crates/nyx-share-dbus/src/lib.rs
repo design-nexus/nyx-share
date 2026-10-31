@@ -51,6 +51,22 @@ pub trait Share {
     /// JSON [`nyx_share_core::PreferencesUpdate`]: the lists it contains replace the saved ones.
     fn set_destination_preferences(&self, update: &str) -> zbus::Result<()>;
 
+    /// Ask nearby devices to answer now.
+    fn scan(&self) -> zbus::Result<()>;
+
+    /// Keep the service, and Nearby visibility, running while the caller is
+    /// connected to the bus (the Share window does this while it's open).
+    fn hold(&self) -> zbus::Result<()>;
+
+    /// JSON [`NearbyStatus`].
+    fn get_nearby(&self) -> zbus::Result<String>;
+
+    /// JSON [`NearbyUpdate`]; the fields present are saved and applied.
+    fn set_nearby(&self, update: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    fn nearby_changed(&self) -> zbus::Result<()>;
+
     #[zbus(signal)]
     fn job_changed(&self, id: &str, job: &str) -> zbus::Result<()>;
 
@@ -84,6 +100,33 @@ pub trait ShareSheet {
 
     /// The sheet closed: an unanswered offer is declined; a transfer continues.
     fn dismiss_incoming(&self, session: &str, token: &str) -> zbus::Result<()>;
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NearbyStatus {
+    /// Discoverable and receiving now.
+    pub enabled: bool,
+    /// The saved setting: `running` or `off`.
+    pub visibility: String,
+    pub alias: String,
+    /// This device's key, uppercase hex; empty until Nearby has started once.
+    pub fingerprint: String,
+    pub receive_folder: String,
+    /// Why Nearby isn't running, when it should be.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NearbyUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receive_folder: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

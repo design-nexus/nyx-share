@@ -1,5 +1,5 @@
 use crate::{config, notify};
-use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, Preferences, arrange, kinds_of};
+use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, Preferences, arrange, kinds_of, summarize};
 use nyx_share_dbus::{INTERFACE, PATH};
 use nyx_share_localsend::{Nearby, Offer};
 use nyx_share_providers::{Payload, Provider, SendError, SendOptions, Task};
@@ -56,7 +56,9 @@ pub struct State {
     pub answered: Condvar,
     jobs: Mutex<Vec<Entry>>,
     bus: OnceLock<zbus::Connection>,
-    pub nearby: OnceLock<Arc<Nearby>>,
+    nearby: Mutex<Option<Arc<Nearby>>>,
+    /// Bus names keeping the service running (open Share windows).
+    pub holders: Mutex<std::collections::HashSet<String>>,
     last_activity: Mutex<Instant>,
 }
 
@@ -67,6 +69,23 @@ const REQUEST_LIFETIME: Duration = Duration::from_secs(30 * 60);
 
 pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Finished jobs survive the service exiting: `$XDG_STATE_HOME/nyx-share/history.json`.
+fn history_path() -> std::path::PathBuf {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"));
+    base.join("nyx-share/history.json")
+}
+
+fn load_history() -> Vec<Job> {
+    std::fs::read_to_string(history_path())
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<Job>>(&s).ok())
+        .map(|jobs| jobs.into_iter().filter(|j| j.state.finished()).take(HISTORY).collect())
+        .unwrap_or_default()
 }
 
 fn now() -> i64 {
@@ -81,9 +100,16 @@ impl State {
             requests: Mutex::new(HashMap::new()),
             incoming: Mutex::new(HashMap::new()),
             answered: Condvar::new(),
-            jobs: Mutex::new(Vec::new()),
+            jobs: Mutex::new(
+                load_history()
+                    .into_iter()
+                    .rev()
+                    .map(|job| Entry { job, cancel: Arc::new(AtomicBool::new(false)), notify: false, last_emit: Instant::now() })
+                    .collect(),
+            ),
             bus: OnceLock::new(),
-            nearby: OnceLock::new(),
+            nearby: Mutex::new(None),
+            holders: Mutex::new(std::collections::HashSet::new()),
             last_activity: Mutex::new(Instant::now()),
         }
     }
@@ -94,6 +120,18 @@ impl State {
 
     pub fn add_provider(&self, provider: Arc<dyn Provider>) {
         self.providers.write().unwrap_or_else(|e| e.into_inner()).push(provider);
+    }
+
+    pub fn remove_provider(&self, id: &str) {
+        self.providers.write().unwrap_or_else(|e| e.into_inner()).retain(|p| p.id() != id);
+    }
+
+    pub fn nearby(&self) -> Option<Arc<Nearby>> {
+        lock(&self.nearby).clone()
+    }
+
+    pub fn set_nearby(&self, nearby: Option<Arc<Nearby>>) {
+        *lock(&self.nearby) = nearby;
     }
 
     pub fn touch(&self) {
@@ -108,7 +146,8 @@ impl State {
         !lock(&self.requests).is_empty()
             || lock(&self.incoming).values().any(|i| !i.dismissed || i.answer == Answer::Pending)
             || lock(&self.jobs).iter().any(|e| !e.job.state.finished())
-            || self.nearby.get().is_some_and(|n| n.busy())
+            || self.nearby().is_some_and(|n| n.busy())
+            || !lock(&self.holders).is_empty()
     }
 
     pub fn expire_requests(&self) {
@@ -153,7 +192,7 @@ impl State {
             e.cancel.store(true, Ordering::Relaxed);
             e.job.direction == Direction::Receive
         };
-        if receiving && let Some(n) = self.nearby.get() {
+        if receiving && let Some(n) = self.nearby() {
             n.cancel_incoming(id);
         }
         true
@@ -175,6 +214,20 @@ impl State {
             excess -= old as usize;
             !old
         });
+    }
+
+    fn save_history(&self) {
+        let finished: Vec<Job> =
+            lock(&self.jobs).iter().rev().filter(|e| e.job.state.finished()).map(|e| e.job.clone()).take(HISTORY).collect();
+        let path = history_path();
+        let Some(dir) = path.parent() else { return };
+        if std::fs::create_dir_all(dir).is_err() {
+            return;
+        }
+        let tmp = path.with_extension("tmp");
+        if std::fs::write(&tmp, serde_json::to_vec(&finished).unwrap_or_default()).is_ok() {
+            let _ = std::fs::rename(tmp, path);
+        }
     }
 
     /// Change a job; signal it now if `force`, else at most five times a second.
@@ -228,6 +281,12 @@ impl State {
             direction: Direction::Send,
             state: JobState::Running,
             items: items.len() as u32,
+            summary: summarize(items.iter().map(|p| match p.info.kind {
+                ContentKind::Text | ContentKind::Url => {
+                    p.info.preview.as_deref().and_then(|t| t.lines().next()).unwrap_or("Text")
+                }
+                _ => p.info.name.as_str(),
+            })),
             bytes_done: 0,
             bytes_total: items.iter().map(Payload::size).sum(),
             message: None,
@@ -278,6 +337,7 @@ impl State {
                 j.outputs = outputs;
             }
         });
+        self.save_history();
         if let Some((job, true)) = finished
             && job.state != JobState::Cancelled
         {
@@ -296,6 +356,7 @@ impl State {
             direction: Direction::Receive,
             state: JobState::Running,
             items: offer.files.len() as u32,
+            summary: summarize(offer.files.iter().map(|f| f.file_name.as_str())),
             bytes_done: 0,
             bytes_total: offer.total,
             message: None,
@@ -335,6 +396,7 @@ impl State {
                 j.message = Some(reason);
             }
         });
+        self.save_history();
         if let Some((job, true)) = finished {
             match job.state {
                 JobState::Completed => {
@@ -363,8 +425,35 @@ impl State {
     }
 
     pub fn destinations_changed(&self) {
+        self.signal("DestinationsChanged");
+    }
+
+    pub fn nearby_changed(&self) {
+        self.signal("NearbyChanged");
+    }
+
+    fn signal(&self, name: &str) {
         if let Some(conn) = self.bus.get() {
-            let _ = async_io::block_on(conn.emit_signal(None::<&str>, PATH, INTERFACE, "DestinationsChanged", &()));
+            let _ = async_io::block_on(conn.emit_signal(None::<&str>, PATH, INTERFACE, name, &()));
+        }
+    }
+
+    /// Forget holders whose connection has closed.
+    pub async fn drop_departed_holders(&self, conn: &zbus::Connection) {
+        let names: Vec<String> = lock(&self.holders).iter().cloned().collect();
+        if names.is_empty() {
+            return;
+        }
+        let Ok(dbus) = zbus::fdo::DBusProxy::new(conn).await else { return };
+        for name in names {
+            let gone = match zbus::names::BusName::try_from(name.as_str()) {
+                Ok(bus) => !dbus.name_has_owner(bus).await.unwrap_or(false),
+                Err(_) => true,
+            };
+            if gone {
+                lock(&self.holders).remove(&name);
+                self.touch();
+            }
         }
     }
 

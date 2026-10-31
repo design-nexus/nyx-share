@@ -1,6 +1,8 @@
-//! nyx-share-sheet: the Share Sheet. The Share service opens it for a request;
-//! apps don't run it directly (they call `Share` on the service).
+//! nyx-share-sheet: the Share window, and the Share Sheet the service opens for
+//! a request or an incoming offer. Apps don't open sheets directly; they call
+//! `Share` on the service.
 
+mod app;
 mod incoming;
 mod prefs;
 mod sheet;
@@ -20,7 +22,10 @@ fn main() -> glib::ExitCode {
         unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
     }
     let id = std::env::var("NYX_SHARE_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
-    let app = gtk::Application::builder().application_id(id).flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE).build();
+    let app = gtk::Application::builder()
+        .application_id(id)
+        .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT)
+        .build();
     app.connect_startup(|_| theme::install());
     app.connect_command_line(|app, cl| {
         let var = |name: &str| cl.getenv(name).map(|v| v.to_string()).filter(|v| !v.is_empty());
@@ -30,12 +35,12 @@ fn main() -> glib::ExitCode {
                 glib::ExitCode::SUCCESS
             }
             (None, Some(session), Some(token)) => {
-                incoming::open(app, session, token);
+                incoming::open(app, session, token, app::window());
                 glib::ExitCode::SUCCESS
             }
             _ => {
-                eprintln!("The Share Sheet is opened by the Share service. To share, run: nyx-share FILE");
-                glib::ExitCode::from(2)
+                app::present(app);
+                glib::ExitCode::SUCCESS
             }
         }
     });

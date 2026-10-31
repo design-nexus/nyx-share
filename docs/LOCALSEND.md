@@ -46,7 +46,8 @@ hex SHA-256 of the certificate.
 
 ## Settings
 
-`$XDG_CONFIG_HOME/nyx-share/nearby.toml` (Settings → Sharing will edit it later):
+`$XDG_CONFIG_HOME/nyx-share/nearby.toml`, changed from the Share app's settings
+or with `SetNearby`; a new name or visibility applies at once:
 
 ```toml
 visibility = "running"          # discoverable and receiving while the service runs; "off" disables Nearby
@@ -54,8 +55,9 @@ alias = "Hades"                 # the name others see; the host name by default
 receive_folder = "/home/me/Downloads"   # the XDG Downloads folder by default
 ```
 
-The service runs while you share and for a minute after, so this computer is
-visible to others only then. Keeping it receiving all the time is a later option.
+The service runs while you share, while the Share window is open, and for a
+minute after, so this computer is visible to others only then. Keeping it
+receiving all the time is a later option.
 
 ## Living beside the official app
 

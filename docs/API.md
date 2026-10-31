@@ -14,13 +14,17 @@ version; anything else gets `Share2`.
 | `ShareTo` | `(s destination, s items, ah fds, s options) → s` | Job id. Sends without the sheet. |
 | `ListDestinations` | `(as kinds, u count) → s` | JSON array of destinations that accept `count` items of `kinds`; every destination when `kinds` is empty. Hidden ones are included and marked. |
 | `GetCapabilities` | `() → s` | JSON: `version`, `providers` (`id`, `name`, `kinds`, `available`, `status`), `max_items`, `max_text_bytes`. |
-| `ListJobs` | `() → s` | JSON array of jobs since the service started (newest first, the last 50 finished ones). |
+| `ListJobs` | `() → s` | JSON array of jobs, newest first: running ones and the last 50 finished ones (kept in `$XDG_STATE_HOME/nyx-share/history.json`). |
 | `GetJob` | `(s id) → s` | JSON job. |
 | `CancelJob` | `(s id) → ()` | |
 | `SetDestinationPreferences` | `(s update) → ()` | `{"order":[…],"pinned":[…],"hidden":[…]}`; each list present replaces the saved one. |
+| `Scan` | `() → ()` | Ask nearby devices to answer now. |
+| `Hold` | `() → ()` | Keep the service, and Nearby visibility, running while the caller stays on the bus. |
+| `GetNearby` | `() → s` | JSON: `enabled`, `visibility` (`running` or `off`), `alias`, `fingerprint`, `receive_folder`, `problem`. |
+| `SetNearby` | `(s update) → ()` | `{"visibility":…,"alias":…,"receive_folder":…}`; fields present are saved and applied at once. |
 
-Property `Version` (`u`, read-only) is `1`. Signals: `JobChanged(s id, s job)`
-and `DestinationsChanged()`.
+Property `Version` (`u`, read-only) is `1`. Signals: `JobChanged(s id, s job)`,
+`DestinationsChanged()` and `NearbyChanged()`.
 
 ## Items
 
@@ -126,4 +130,7 @@ s options) → s job`, `Dismiss(s, s)`. For offers from nearby devices:
 the sheet in `NYX_SHARE_REQUEST` or `NYX_SHARE_INCOMING`, and `NYX_SHARE_TOKEN`.
 For checks, `NYX_SHARE_CHECK_CHOOSE` (`save:/path;clipboard`) makes the sheet
 choose destinations as if clicked, and `NYX_SHARE_CHECK_ANSWER` (`accept` or
-`decline`) answers an offer after two seconds.
+`decline`) answers an offer after two seconds. In the Share window,
+`NYX_SHARE_CHECK_ADD` (`/a:/b`) fills the tray, `NYX_SHARE_CHECK_PAGE`
+(`transfers` or `settings`) opens a page and `NYX_SHARE_CHECK_SEND=1` sends to
+the first device that appears.

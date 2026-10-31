@@ -31,6 +31,23 @@ that doesn't exist yet.
 ![Transfers in progress and a failure with Retry](docs/screenshots/transfers-dark.png)
 ![A link in the light theme](docs/screenshots/link-light.png)
 
+## The Share app
+
+**Share** in the launcher is a small floating window for nearby sharing, in
+place of the LocalSend app: drop files in (or choose files or text), then press
+**Send** beside a phone or computer. **Transfers** lists what you sent and
+received, kept across restarts. The switch at the bottom says whether this
+computer is visible to nearby devices; while the window is open it stays
+visible and can receive. Offers that arrive while it's open ask in a dialog
+over the window. Settings (the sliders button) has the name others see, the
+receive folder and this device's key. Ctrl+, opens them, F5 looks for devices
+again, Esc closes.
+
+![The Share window with files chosen](docs/screenshots/app-nearby-dark.png)
+![An offer from a nearby phone](docs/screenshots/app-incoming-dark.png)
+![Transfers](docs/screenshots/app-transfers-dark.png)
+![Settings in the light theme](docs/screenshots/app-settings-light.png)
+
 ## Install
 
 ```sh
@@ -39,7 +56,8 @@ curl -fsSL https://raw.githubusercontent.com/design-nexus/nyx-share/main/install
 
 From a checkout: `./install.sh`. It installs `nyx-share`, `nyx-share-daemon` and
 `nyx-share-sheet` to `~/.local/bin`, the D-Bus activation file, a systemd user
-unit, the icon and a hidden desktop entry. Nothing starts until something shares.
+unit, the icon, the launcher entry for the Share app and the Nyx Files provider.
+Nothing starts until you share or open Share.
 `./uninstall.sh` removes them (`--purge` also removes your destination arrangement).
 
 Requires Rust 1.99, GTK 4.18, a session bus and, for the clipboard, `wl-clipboard`.
@@ -94,7 +112,8 @@ The service keeps your arrangement (order, pinned and hidden destinations) in
 or over D-Bus. The sheet remembers the last Save to folder location in
 `~/.config/nyx-share/settings.toml`. Nearby sharing reads
 `~/.config/nyx-share/nearby.toml` (visibility, the name others see, the receive
-folder); see [LOCALSEND.md](docs/LOCALSEND.md).
+folder), which the Share app's settings change; see [LOCALSEND.md](docs/LOCALSEND.md).
+Finished transfers are listed from `~/.local/state/nyx-share/history.json`.
 
 ## Build and test
 

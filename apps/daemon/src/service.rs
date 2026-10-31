@@ -1,7 +1,9 @@
 use crate::state::{Answer, Request, State, lock};
-use crate::{caller, items, launch};
+use crate::{caller, items, launch, nearby};
 use nyx_share_core::{API_VERSION, ContentKind, Limits, PreferencesUpdate, kinds_of};
-use nyx_share_dbus::{Capabilities, IncomingFile, IncomingInfo, ProviderInfo, RequestInfo, ShareOptions};
+use nyx_share_dbus::{
+    Capabilities, IncomingFile, IncomingInfo, NearbyStatus, NearbyUpdate, ProviderInfo, RequestInfo, ShareOptions,
+};
 use nyx_share_providers::{Payload, SendOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -116,7 +118,7 @@ impl Share1 {
                 jobs: Vec::new(),
             },
         );
-        if let Some(n) = self.0.nearby.get() {
+        if let Some(n) = self.0.nearby() {
             n.scan();
         }
         if let Err(e) = launch::sheet(&id, &token) {
@@ -182,6 +184,47 @@ impl Share1 {
         let _ = Self::destinations_changed(&emitter).await;
         Ok(())
     }
+
+    fn scan(&self) {
+        self.0.touch();
+        if let Some(n) = self.0.nearby() {
+            n.scan();
+        }
+    }
+
+    async fn hold(&self, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        self.0.touch();
+        let sender = header.sender().ok_or_else(|| fdo::Error::AccessDenied("The caller has no bus name".into()))?;
+        lock(&self.0.holders).insert(sender.to_string());
+        Ok(())
+    }
+
+    fn get_nearby(&self) -> String {
+        self.0.touch();
+        let settings = nearby::settings();
+        let running = self.0.nearby();
+        json(&NearbyStatus {
+            enabled: running.is_some(),
+            visibility: if settings.visibility == nearby::Visibility::Off { "off".into() } else { "running".into() },
+            alias: running.as_ref().map(|n| n.me().alias).unwrap_or_else(|| nearby::alias(&settings)),
+            fingerprint: running.as_ref().map(|n| n.fingerprint().to_string()).unwrap_or_else(nearby::fingerprint),
+            receive_folder: nearby::receive_folder().display().to_string(),
+            problem: nearby::problem().filter(|_| settings.visibility != nearby::Visibility::Off),
+        })
+    }
+
+    fn set_nearby(&self, update: &str) -> fdo::Result<()> {
+        self.0.touch();
+        let update: NearbyUpdate =
+            serde_json::from_str(update).map_err(|e| fdo::Error::InvalidArgs(format!("The settings aren't valid JSON: {e}")))?;
+        nearby::update(&self.0, update).map_err(|e| match e.kind() {
+            std::io::ErrorKind::InvalidInput => fdo::Error::InvalidArgs(e.to_string()),
+            _ => fdo::Error::Failed(format!("Couldn't save the Nearby settings: {e}")),
+        })
+    }
+
+    #[zbus(signal)]
+    async fn nearby_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
 
     #[zbus(signal)]
     async fn job_changed(emitter: &SignalEmitter<'_>, id: &str, job: &str) -> zbus::Result<()>;

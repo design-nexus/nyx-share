@@ -213,6 +213,7 @@ fn listen(sheet: &Rc<Sheet>) {
             match event {
                 Event::JobChanged(job) => sheet.job_changed(&job),
                 Event::DestinationsChanged => sheet.refresh(),
+                Event::NearbyChanged => {}
             }
         }
     });
@@ -1001,6 +1002,7 @@ mod tests {
             direction: nyx_share_core::Direction::Send,
             state,
             items: 1,
+            summary: None,
             bytes_done: done,
             bytes_total: 10,
             message: None,

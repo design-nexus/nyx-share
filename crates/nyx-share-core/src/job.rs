@@ -34,6 +34,9 @@ pub struct Job {
     pub direction: Direction,
     pub state: JobState,
     pub items: u32,
+    /// What is being moved, for lists: "report.pdf and 2 more".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     pub bytes_done: u64,
     pub bytes_total: u64,
     /// What happened, in a sentence: "Copied to the clipboard", or the error.
@@ -45,6 +48,17 @@ pub struct Job {
     /// Unix seconds.
     pub created: i64,
     pub updated: i64,
+}
+
+/// "a.pdf", "a.pdf and b.jpg", "a.pdf, b.jpg and 3 more".
+pub fn summarize<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let names: Vec<&str> = names.into_iter().collect();
+    match names.as_slice() {
+        [] => None,
+        [a] => Some(a.to_string()),
+        [a, b] => Some(format!("{a} and {b}")),
+        [a, b, rest @ ..] => Some(format!("{a}, {b} and {} more", rest.len())),
+    }
 }
 
 impl Job {

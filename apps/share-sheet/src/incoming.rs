@@ -36,7 +36,8 @@ struct View {
     closed: Cell<bool>,
 }
 
-pub fn open(app: &gtk::Application, session: String, token: String) {
+/// Over `parent` (the Share window) when it's open, else on its own.
+pub fn open(app: &gtk::Application, session: String, token: String, parent: Option<gtk::ApplicationWindow>) {
     let hold = app.hold();
     let app = app.clone();
     nyx_core::cmd::background(
@@ -49,7 +50,7 @@ pub fn open(app: &gtk::Application, session: String, token: String) {
         },
         move |result| {
             match result {
-                Ok((conn, info)) => build(&app, conn, info),
+                Ok((conn, info)) => build(&app, conn, info, parent),
                 Err(e) => sheet::failed(&app, &e),
             }
             drop(hold);
@@ -79,8 +80,12 @@ fn files_phrase(n: usize) -> String {
     if n == 1 { "1 file".into() } else { format!("{n} files") }
 }
 
-fn build(app: &gtk::Application, conn: Arc<Conn>, info: IncomingInfo) {
+fn build(app: &gtk::Application, conn: Arc<Conn>, info: IncomingInfo, parent: Option<gtk::ApplicationWindow>) {
     let (window, header, body) = sheet::window(app);
+    if let Some(parent) = parent {
+        window.set_transient_for(Some(&parent));
+        window.set_modal(true);
+    }
     header.set_subtitle("Incoming");
     let banner_slot = widgets::vbox(0);
     body.append(&banner_slot);

@@ -134,6 +134,16 @@ impl Receiver {
         self.session.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Stop listening. Transfers in progress are cut off.
+    pub fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(s) = self.lock().as_ref() {
+            s.cancel.store(true, Ordering::Relaxed);
+        }
+        // Wake the accept loop so it sees the flag.
+        let _ = TcpStream::connect_timeout(&(Ipv4Addr::LOCALHOST, self.port).into(), Duration::from_millis(200));
+    }
+
     pub fn busy(&self) -> bool {
         self.pending.load(Ordering::Relaxed) || self.lock().is_some()
     }

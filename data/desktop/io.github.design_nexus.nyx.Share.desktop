@@ -1,10 +1,12 @@
 [Desktop Entry]
 Type=Application
 Name=Share
-Comment=Share files, text and links with apps, devices and folders
+GenericName=Nearby Sharing
+Comment=Send files, text and links to nearby phones and computers
 Exec=nyx-share-sheet
 Icon=io.github.design_nexus.nyx.Share
 Terminal=false
-NoDisplay=true
+StartupNotify=true
+Keywords=localsend;nearby;airdrop;send;receive;transfer;
 StartupWMClass=io.github.design_nexus.nyx.Share
-Categories=Utility;GTK;
+Categories=Network;FileTransfer;GTK;

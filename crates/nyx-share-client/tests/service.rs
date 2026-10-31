@@ -38,6 +38,7 @@ fn service() -> &'static Service {
         assert!(daemon.exists(), "build nyx-share-daemon first");
         let child = Command::new(daemon)
             .env("XDG_CONFIG_HOME", root.join("config"))
+            .env("XDG_STATE_HOME", root.join("state"))
             .env("NYX_SHARE_SHEET", &sheet)
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("INVOCATION_ID")

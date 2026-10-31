@@ -39,6 +39,7 @@ fn main() -> anyhow::Result<()> {
         loop {
             async_io::Timer::after(Duration::from_secs(15)).await;
             state.expire_requests();
+            state.drop_departed_holders(&conn).await;
             if state.idle_for() >= IDLE_EXIT && !state.busy() {
                 // Give the name up first so new calls start a fresh service.
                 let _ = conn.release_name(BUS).await;

@@ -11,8 +11,10 @@
 //!
 //! Calls block, so make them from a worker thread, never a UI thread.
 
-pub use nyx_share_core::{ContentKind, Destination, Job, JobState, PreferencesUpdate};
-pub use nyx_share_dbus::{BUS, Capabilities, INTERFACE, PATH, ProviderInfo, RequestInfo, ShareOptions};
+pub use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, PreferencesUpdate};
+pub use nyx_share_dbus::{
+    BUS, Capabilities, INTERFACE, NearbyStatus, NearbyUpdate, PATH, ProviderInfo, RequestInfo, ShareOptions,
+};
 
 use nyx_share_core::ItemSpec;
 use nyx_share_dbus::{ShareProxyBlocking, ShareSheetProxyBlocking};
@@ -27,6 +29,7 @@ use zbus::zvariant::Fd;
 pub enum Event {
     JobChanged(Job),
     DestinationsChanged,
+    NearbyChanged,
 }
 
 #[derive(Debug)]
@@ -217,6 +220,23 @@ impl Client {
         Ok(self.proxy.set_destination_preferences(&to_json(update))?)
     }
 
+    pub fn scan(&self) -> Result<(), Error> {
+        Ok(self.proxy.scan()?)
+    }
+
+    /// Keep the service running while this connection lasts.
+    pub fn hold(&self) -> Result<(), Error> {
+        Ok(self.proxy.hold()?)
+    }
+
+    pub fn nearby(&self) -> Result<NearbyStatus, Error> {
+        json(&self.proxy.get_nearby()?)
+    }
+
+    pub fn set_nearby(&self, update: &NearbyUpdate) -> Result<(), Error> {
+        Ok(self.proxy.set_nearby(&to_json(update))?)
+    }
+
     /// Block until job `id` finishes, calling `progress` on each change.
     pub fn wait(&self, id: &str, mut progress: impl FnMut(&Job)) -> Result<Job, Error> {
         let (tx, rx) = mpsc::channel();
@@ -263,6 +283,7 @@ impl Client {
                     serde_json::from_str(&job).ok().map(Event::JobChanged)
                 }
                 "DestinationsChanged" => Some(Event::DestinationsChanged),
+                "NearbyChanged" => Some(Event::NearbyChanged),
                 _ => None,
             }
         }))

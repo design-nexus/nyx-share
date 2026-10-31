@@ -23,7 +23,7 @@ flowchart LR
 | `nyx-share-providers` | The `Provider` trait and the built-in destinations. |
 | `nyx-share-localsend` | LocalSend v2: identity, TLS, discovery, sender, receiver, and the Nearby provider. |
 | `apps/daemon` | `nyx-share-daemon`: owns requests, jobs, providers and the destination arrangement. |
-| `apps/share-sheet` | `nyx-share-sheet`: the GTK 4 window. Stateless; everything comes from the service. |
+| `apps/share-sheet` | `nyx-share-sheet`: the Share app window (launcher), the Share Sheet and the incoming-offer prompt, in one GTK application. Stateless; everything comes from the service. |
 | `apps/cli` | `nyx-share`. |
 
 ## Decisions

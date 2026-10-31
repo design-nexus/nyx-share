@@ -54,6 +54,7 @@ pub struct Nearby {
     multicast: Option<discovery::Multicast>,
     receiver: OnceLock<Arc<receiver::Receiver>>,
     events: Arc<dyn Events>,
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 struct Bridge(Weak<Nearby>);
@@ -136,6 +137,7 @@ impl Nearby {
             multicast,
             receiver: OnceLock::new(),
             events,
+            stopped: std::sync::atomic::AtomicBool::new(false),
         });
         let receiver = receiver::Receiver::start(&nearby.identity, Arc::new(Bridge(Arc::downgrade(&nearby))), PORT)?;
         nearby.me.lock().unwrap_or_else(|e| e.into_inner()).port = receiver.port;
@@ -143,7 +145,7 @@ impl Nearby {
         let listener = Arc::downgrade(&nearby);
         std::thread::spawn(move || {
             loop {
-                let Some(n) = listener.upgrade() else { break };
+                let Some(n) = listener.upgrade().filter(|n| !n.stopped.load(std::sync::atomic::Ordering::Relaxed)) else { break };
                 let Some(mc) = n.multicast.as_ref().filter(|m| m.listening()) else { break };
                 if let Some((info, ip)) = mc.receive() {
                     let announce = info.announce == Some(true);
@@ -180,8 +182,19 @@ impl Nearby {
 
     /// Ask nearby devices to answer.
     pub fn scan(&self) {
+        if self.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         if let Some(mc) = &self.multicast {
             mc.announce(&self.me(), true);
+        }
+    }
+
+    /// Stop receiving and discovery for good; start a new Nearby to resume.
+    pub fn stop(&self) {
+        self.stopped.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(r) = self.receiver.get() {
+            r.stop();
         }
     }
 

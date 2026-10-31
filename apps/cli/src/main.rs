@@ -86,7 +86,7 @@ fn run(args: &[String]) -> Result<ExitCode, Error> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&jobs).unwrap_or_default());
             } else if jobs.is_empty() {
-                println!("No transfers since the service started.");
+                println!("No transfers yet.");
             } else {
                 for j in jobs {
                     println!("{}  {:<9} {}  {}", j.id, format!("{:?}", j.state).to_lowercase(), j.destination_name, describe(&j));

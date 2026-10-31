@@ -173,3 +173,97 @@ window.share-window .incoming-message {
 window.share-window .incoming-buttons {
   margin-top: 14px;
 }
+
+/* The Share window */
+window.share-window .app-tray {
+  padding: 12px 12px 12px 14px;
+}
+
+window.share-window .app-tray.idle {
+  background: alpha(@theme_text, 0.025);
+  box-shadow: inset 0 0 0 1.5px alpha(@theme_text, 0.09);
+}
+
+window.share-window .app-drop {
+  border-radius: 9px;
+  background: @field;
+  color: @theme_text_tertiary;
+}
+
+window.share-window .app-live {
+  font-weight: 500;
+  color: @theme_text_tertiary;
+}
+
+window.share-window .app-devices {
+  padding: 0;
+}
+
+window.share-window .app-device {
+  padding: 9px 10px 9px 12px;
+}
+
+window.share-window .app-device.following {
+  border-top: 1px solid @hairline;
+}
+
+window.share-window .app-device .ok {
+  color: @theme_success;
+}
+
+window.share-window .error {
+  color: @theme_danger;
+}
+
+window.share-window .app-dir {
+  border-radius: 8px;
+}
+
+window.share-window .app-dir.out {
+  background: alpha(@theme_accent, 0.14);
+  color: @theme_accent;
+}
+
+window.share-window .app-dir.in {
+  background: alpha(@theme_success, 0.14);
+  color: @theme_success;
+}
+
+window.share-window .app-dir.bad {
+  background: alpha(@theme_danger, 0.14);
+  color: @theme_danger;
+}
+
+window.share-window .app-status {
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+window.share-window .app-when {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+window.share-window .app-empty {
+  padding: 26px 20px 24px 20px;
+}
+
+window.share-window .app-footer {
+  margin-top: 14px;
+  padding: 10px 12px 10px 16px;
+  border-top: 1px solid @hairline;
+}
+
+window.share-window .app-footer-title {
+  font-weight: 500;
+}
+
+window.share-window .app-footer-note {
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+window.share-window .app-group-title {
+  margin: 16px 4px 8px 4px;
+  font-weight: 600;
+}
