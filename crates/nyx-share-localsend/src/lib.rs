@@ -7,6 +7,7 @@ pub mod http;
 pub mod identity;
 pub mod receiver;
 pub mod sender;
+pub mod tailnet;
 pub mod tls;
 
 pub use dto::DeviceInfo;
@@ -55,6 +56,9 @@ pub struct Nearby {
     receiver: OnceLock<Arc<receiver::Receiver>>,
     events: Arc<dyn Events>,
     stopped: std::sync::atomic::AtomicBool,
+    /// Look for LocalSend on tailnet devices too.
+    tailscale: bool,
+    probing: std::sync::atomic::AtomicBool,
 }
 
 struct Bridge(Weak<Nearby>);
@@ -116,7 +120,7 @@ impl receiver::Host for Bridge {
 
 impl Nearby {
     /// Start receiving and discovery. `dir` keeps this device's identity.
-    pub fn start(dir: &Path, alias: String, events: Arc<dyn Events>) -> io::Result<Arc<Self>> {
+    pub fn start(dir: &Path, alias: String, tailscale: bool, events: Arc<dyn Events>) -> io::Result<Arc<Self>> {
         let identity = identity::Identity::load_or_create(dir)?;
         let me = DeviceInfo {
             alias,
@@ -138,6 +142,8 @@ impl Nearby {
             receiver: OnceLock::new(),
             events,
             stopped: std::sync::atomic::AtomicBool::new(false),
+            tailscale,
+            probing: std::sync::atomic::AtomicBool::new(false),
         });
         let receiver = receiver::Receiver::start(&nearby.identity, Arc::new(Bridge(Arc::downgrade(&nearby))), PORT)?;
         nearby.me.lock().unwrap_or_else(|e| e.into_inner()).port = receiver.port;
@@ -161,6 +167,7 @@ impl Nearby {
                 n.scan();
             }
         });
+        nearby.probe_tailnet();
         Ok(nearby)
     }
 
@@ -188,6 +195,42 @@ impl Nearby {
         if let Some(mc) = &self.multicast {
             mc.announce(&self.me(), true);
         }
+    }
+
+    /// Introduce ourselves to every online tailnet device that answers on the
+    /// LocalSend port. Each check runs on its own thread; one round at a time.
+    pub fn probe_tailnet(self: &Arc<Self>) {
+        use std::sync::atomic::Ordering;
+        if !self.tailscale || self.stopped.load(Ordering::Relaxed) || self.probing.swap(true, Ordering::Relaxed) {
+            return;
+        }
+        let me = self.clone();
+        std::thread::spawn(move || {
+            if let tailnet::Status::Running { me: own, peers } = tailnet::status() {
+                let handles: Vec<_> = peers
+                    .into_iter()
+                    .filter(|p| p.online && p.ip != own)
+                    .map(|p| {
+                        let n = me.clone();
+                        std::thread::spawn(move || {
+                            let target = sender::Target { fingerprint: String::new(), addr: IpAddr::V4(p.ip), port: PORT };
+                            if let Ok(info) = sender::register(&n.identity, &n.me(), &target) {
+                                n.heard(
+                                    DeviceInfo { port: PORT, protocol: "https".into(), ..info },
+                                    IpAddr::V4(p.ip),
+                                    true,
+                                    false,
+                                );
+                            }
+                        })
+                    })
+                    .collect();
+                for h in handles {
+                    let _ = h.join();
+                }
+            }
+            me.probing.store(false, Ordering::Relaxed);
+        });
     }
 
     /// Stop receiving and discovery for good; start a new Nearby to resume.
@@ -222,6 +265,12 @@ impl Nearby {
         if key == self.identity.fingerprint || key.is_empty() {
             return;
         }
+        // The local network first: a device seen there recently keeps that address.
+        let lan = self.peer(&key).filter(|p| !tailnet::is_tailscale(&p.addr) && p.seen.elapsed() < Duration::from_secs(120));
+        let (addr, info) = match lan {
+            Some(o) if tailnet::is_tailscale(&addr) => (o.addr, DeviceInfo { port: o.info.port, ..info }),
+            _ => (addr, info),
+        };
         let changed = {
             let mut peers = self.peers.lock().unwrap_or_else(|e| e.into_inner());
             let old = peers.get(&key).cloned();
@@ -303,7 +352,11 @@ impl Provider for NearbyProvider {
                     max_items: None,
                     needs_folder: false,
                     available: encrypted,
-                    status: Some(if encrypted { "LocalSend".into() } else { "Encryption is off on that device".into() }),
+                    status: Some(match (encrypted, tailnet::is_tailscale(&p.addr)) {
+                        (false, _) => "Encryption is off on that device".into(),
+                        (true, true) => "Tailscale".into(),
+                        (true, false) => "LocalSend".into(),
+                    }),
                     pinned: false,
                     hidden: false,
                 }

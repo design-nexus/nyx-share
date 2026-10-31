@@ -18,11 +18,13 @@ fn algorithms() -> WebPkiSupportedAlgorithms {
     rustls::crypto::ring::default_provider().signature_verification_algorithms
 }
 
-/// Accepts exactly the certificate with this fingerprint. The handshake
-/// signature still proves the peer holds its private key.
+/// Accepts exactly the certificate with this fingerprint, or any certificate
+/// when meeting a device for the first time (its fingerprint is then checked
+/// against what it says about itself). The handshake signature still proves
+/// the peer holds the certificate's private key.
 #[derive(Debug)]
 struct Pinned {
-    expected: String,
+    expected: Option<String>,
 }
 
 impl ServerCertVerifier for Pinned {
@@ -34,7 +36,7 @@ impl ServerCertVerifier for Pinned {
         _: &[u8],
         _: UnixTime,
     ) -> Result<ServerCertVerified, Error> {
-        if fingerprint(cert) == self.expected {
+        if self.expected.as_ref().is_none_or(|e| fingerprint(cert) == *e) {
             Ok(ServerCertVerified::assertion())
         } else {
             Err(Error::InvalidCertificate(CertificateError::ApplicationVerificationFailure))
@@ -114,12 +116,12 @@ impl ClientCertVerifier for AnyClient {
     }
 }
 
-/// For talking to the peer with `fingerprint`, presenting our certificate.
-pub fn client(identity: &Identity, fingerprint: &str) -> Result<Arc<rustls::ClientConfig>, Error> {
+/// For talking to the peer with `fingerprint` (any, if None), presenting our certificate.
+pub fn client(identity: &Identity, fingerprint: Option<&str>) -> Result<Arc<rustls::ClientConfig>, Error> {
     let mut config = rustls::ClientConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()?
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(Pinned { expected: fingerprint.to_ascii_uppercase() }))
+        .with_custom_certificate_verifier(Arc::new(Pinned { expected: fingerprint.map(str::to_ascii_uppercase) }))
         .with_client_auth_cert(vec![identity.cert.clone()], identity.key())?;
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(Arc::new(config))

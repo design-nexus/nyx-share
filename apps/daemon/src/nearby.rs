@@ -22,7 +22,7 @@ pub enum Visibility {
 }
 
 /// `$XDG_CONFIG_HOME/nyx-share/nearby.toml`.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub visibility: Visibility,
@@ -30,6 +30,20 @@ pub struct Settings {
     pub alias: Option<String>,
     /// Where received files go; the XDG Downloads folder if unset.
     pub receive_folder: Option<PathBuf>,
+    /// Also look for LocalSend on the devices of the user's tailnet.
+    pub tailscale: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { visibility: Visibility::Running, alias: None, receive_folder: None, tailscale: true }
+    }
+}
+
+/// Look for devices: multicast on the local network, and the tailnet.
+pub fn look(nearby: &Arc<Nearby>) {
+    nearby.scan();
+    nearby.probe_tailnet();
 }
 
 fn home() -> PathBuf {
@@ -107,7 +121,7 @@ pub fn start(state: Arc<State>) {
         return;
     }
     let bridge = Arc::new(Bridge(Arc::downgrade(&state)));
-    match Nearby::start(&identity_dir(), alias(&settings), bridge) {
+    match Nearby::start(&identity_dir(), alias(&settings), settings.tailscale, bridge) {
         Ok(nearby) => {
             *PROBLEM.lock().unwrap_or_else(|e| e.into_inner()) = None;
             state.set_nearby(Some(nearby.clone()));
@@ -137,6 +151,10 @@ pub fn update(state: &Arc<State>, update: nyx_share_dbus::NearbyUpdate) -> std::
     let mut s = settings();
     let old_alias = alias(&s);
     let old_visibility = s.visibility.clone();
+    let old_tailscale = s.tailscale;
+    if let Some(t) = update.tailscale {
+        s.tailscale = t;
+    }
     if let Some(v) = update.visibility {
         s.visibility = match v.as_str() {
             "off" => Visibility::Off,
@@ -160,7 +178,8 @@ pub fn update(state: &Arc<State>, update: nyx_share_dbus::NearbyUpdate) -> std::
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, toml::to_string(&s).map_err(std::io::Error::other)?)?;
     std::fs::rename(tmp, &path)?;
-    let restart = s.visibility == Visibility::Running && (old_visibility == Visibility::Off || alias(&s) != old_alias);
+    let restart = s.visibility == Visibility::Running
+        && (old_visibility == Visibility::Off || alias(&s) != old_alias || s.tailscale != old_tailscale);
     if s.visibility == Visibility::Off || restart {
         stop(state);
     }

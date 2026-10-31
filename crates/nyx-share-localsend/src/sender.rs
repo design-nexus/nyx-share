@@ -13,6 +13,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 pub struct Target {
+    /// Empty when meeting a device for the first time.
     pub fingerprint: String,
     pub addr: IpAddr,
     pub port: u16,
@@ -75,9 +76,11 @@ struct Connection {
 }
 
 fn connect(identity: &Identity, target: &Target) -> Result<Connection, Error> {
-    let config = crate::tls::client(identity, &target.fingerprint).map_err(|e| Error::Failed(e.to_string()))?;
+    let pin = Some(target.fingerprint.as_str()).filter(|f| !f.is_empty());
+    let config = crate::tls::client(identity, pin).map_err(|e| Error::Failed(e.to_string()))?;
     let addr = SocketAddr::new(target.addr, target.port);
-    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(|e| Error::Unreachable(e.to_string()))?;
+    let wait = if pin.is_some() { 5 } else { 2 };
+    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(wait)).map_err(|e| Error::Unreachable(e.to_string()))?;
     tcp.set_nodelay(true).ok();
     let name = rustls::pki_types::ServerName::IpAddress(target.addr.into());
     let conn = rustls::ClientConnection::new(config, name).map_err(|e| Error::Failed(e.to_string()))?;
@@ -103,7 +106,7 @@ fn exchange(
     idle: Duration,
     cancel: &AtomicBool,
     progress: &(dyn Fn(u64) + Sync),
-) -> Result<(u16, Vec<u8>), Error> {
+) -> Result<(u16, Vec<u8>, Option<String>), Error> {
     let Connection { tcp, mut tls } = connect(identity, target)?;
     tls.sock.set_read_timeout(Some(idle)).ok();
     tls.sock.set_write_timeout(Some(Duration::from_secs(60))).ok();
@@ -121,10 +124,11 @@ fn exchange(
                 Ok(())
             });
             let result = sent.and_then(|()| {
+                let peer = tls.conn.peer_certificates().and_then(|c| c.first()).map(|c| crate::identity::fingerprint(c));
                 let mut reader = BufReader::new(&mut tls);
                 let head = http::read_response_head(&mut reader)?;
                 let body = http::read_limited(http::body(&mut reader, &head), 1 << 20)?;
-                Ok((head.status, body))
+                Ok((head.status, body, peer))
             });
             let _ = tx.send(());
             (result, stopped)
@@ -185,7 +189,7 @@ pub fn send(
         length,
         body: Box::new(io::Cursor::new(request)),
     };
-    let (status, body) = exchange(identity, target, post, Duration::from_secs(600), cancel, &quiet)?;
+    let (status, body, _) = exchange(identity, target, post, Duration::from_secs(600), cancel, &quiet)?;
     let session = match status {
         200 => serde_json::from_slice::<PrepareUploadResponse>(&body)
             .map_err(|e| Error::Failed(format!("The other device sent an unexpected answer: {e}")))?,
@@ -212,8 +216,8 @@ pub fn send(
         let post = http::Post { target: path, content_type: "application/octet-stream", length: file.size, body };
         let result = exchange(identity, target, post, Duration::from_secs(120), cancel, progress);
         match result {
-            Ok((200, _)) => accepted += 1,
-            Ok((s, _)) => {
+            Ok((200, _, _)) => accepted += 1,
+            Ok((s, _, _)) => {
                 let _ = cancel_session(identity, target, &session.session_id);
                 return Err(Error::Failed(match s {
                     403 => "The other device stopped the transfer".into(),
@@ -244,12 +248,19 @@ pub fn register(identity: &Identity, me: &DeviceInfo, target: &Target) -> Result
         length,
         body: Box::new(io::Cursor::new(body)),
     };
-    let (status, reply) = exchange(identity, target, post, Duration::from_secs(5), &never, &|_| {})?;
+    let (status, reply, peer) = exchange(identity, target, post, Duration::from_secs(5), &never, &|_| {})?;
     if status != 200 {
         return Err(Error::Failed(format!("register answered {status}")));
     }
     let mut theirs: DeviceInfo = serde_json::from_slice(&reply).map_err(|e| Error::Failed(e.to_string()))?;
-    theirs.fingerprint = target.fingerprint.to_ascii_uppercase();
+    let presented = peer.ok_or_else(|| Error::Failed("The device presented no certificate".into()))?;
+    if target.fingerprint.is_empty() {
+        // First meeting: it must hold the certificate it says is its own.
+        if !theirs.fingerprint.eq_ignore_ascii_case(&presented) {
+            return Err(Error::Failed("The device's certificate doesn't match the key it claims".into()));
+        }
+    }
+    theirs.fingerprint = presented;
     Ok(theirs)
 }
 

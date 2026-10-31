@@ -119,7 +119,7 @@ impl Share1 {
             },
         );
         if let Some(n) = self.0.nearby() {
-            n.scan();
+            nearby::look(&n);
         }
         if let Err(e) = launch::sheet(&id, &token) {
             self.0.requests.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
@@ -188,7 +188,7 @@ impl Share1 {
     fn scan(&self) {
         self.0.touch();
         if let Some(n) = self.0.nearby() {
-            n.scan();
+            nearby::look(&n);
         }
     }
 
@@ -210,6 +210,8 @@ impl Share1 {
             fingerprint: running.as_ref().map(|n| n.fingerprint().to_string()).unwrap_or_else(nearby::fingerprint),
             receive_folder: nearby::receive_folder().display().to_string(),
             problem: nearby::problem().filter(|_| settings.visibility != nearby::Visibility::Off),
+            tailscale: settings.tailscale,
+            tailscale_state: nyx_share_localsend::tailnet::status().label().into(),
         })
     }
 

@@ -27,6 +27,23 @@ of our own.
   opened automatically. A notification reports the result if the sheet was
   closed.
 
+## Over Tailscale
+
+Multicast doesn't cross Tailscale, and public Wi-Fi usually isolates devices
+from each other, so Share also looks on your tailnet: when it starts and
+whenever you share, open the Share window, or press Look again, it asks
+`tailscale status` for online devices and introduces itself to each on the
+LocalSend port. A device that answers appears with "Tailscale" under its name,
+and the introduction also puts this computer in that device's LocalSend list,
+so it can send back. A device also seen on the local network in the last two
+minutes keeps its local address. Tailscale's access rules decide what is
+reachable; devices need LocalSend open (and, on phones, the Tailscale app on).
+Turn it off with `tailscale = false` or in the Share window's settings.
+
+On a first meeting the device's certificate isn't known yet: the connection is
+accepted only if the certificate it presents has the fingerprint it claims,
+and from then on that fingerprint is pinned like any other.
+
 ## Identity and trust
 
 The device key is an RSA-2048 self-signed certificate (`CN=LocalSend User`,
@@ -53,6 +70,7 @@ or with `SetNearby`; a new name or visibility applies at once:
 visibility = "running"          # discoverable and receiving while the service runs; "off" disables Nearby
 alias = "Hades"                 # the name others see; the host name by default
 receive_folder = "/home/me/Downloads"   # the XDG Downloads folder by default
+tailscale = true                # also look on your tailnet devices
 ```
 
 The service runs while you share, while the Share window is open, and for a

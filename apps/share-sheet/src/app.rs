@@ -1052,6 +1052,19 @@ impl App {
             },
         );
         card.append(&visible_row);
+        let (desc, usable) = match s.tailscale_state.as_str() {
+            "running" => ("Also look on your tailnet devices; they need LocalSend open.", true),
+            "stopped" => ("Tailscale isn't connected on this computer.", true),
+            _ => ("Install Tailscale to reach your devices from any network.", false),
+        };
+        let weak = Rc::downgrade(self);
+        let (tailscale_row, tailscale) = widgets::switch_row("Find devices over Tailscale", desc, s.tailscale, move |on| {
+            if let Some(app) = weak.upgrade() {
+                app.set_nearby(NearbyUpdate { tailscale: Some(on), ..Default::default() });
+            }
+        });
+        tailscale.set_sensitive(usable);
+        card.append(&tailscale_row);
         let key = if s.fingerprint.len() >= 16 {
             let f = &s.fingerprint;
             format!("{} {} … {} {}", &f[..4], &f[4..8], &f[f.len() - 8..f.len() - 4], &f[f.len() - 4..])

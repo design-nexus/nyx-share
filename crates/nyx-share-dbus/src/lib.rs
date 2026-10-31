@@ -116,6 +116,10 @@ pub struct NearbyStatus {
     /// Why Nearby isn't running, when it should be.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub problem: Option<String>,
+    /// Looking for LocalSend on tailnet devices is turned on.
+    pub tailscale: bool,
+    /// Tailscale on this computer: `running`, `stopped` or `missing`.
+    pub tailscale_state: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -127,6 +131,8 @@ pub struct NearbyUpdate {
     pub alias: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub receive_folder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tailscale: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

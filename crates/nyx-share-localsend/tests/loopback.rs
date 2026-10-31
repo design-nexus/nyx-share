@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 
 struct TestHost {
     me: DeviceInfo,
+    /// What the receiver claims as its fingerprint, when it lies.
+    claim: Option<String>,
     folder: PathBuf,
     accept: bool,
     offers: Mutex<Vec<Offer>>,
@@ -21,7 +23,11 @@ struct TestHost {
 
 impl Host for TestHost {
     fn me(&self) -> DeviceInfo {
-        self.me.clone()
+        let mut me = self.me.clone();
+        if let Some(c) = &self.claim {
+            me.fingerprint = c.clone();
+        }
+        me
     }
     fn registered(&self, _: DeviceInfo, _: IpAddr, _: bool) {}
     fn offer(&self, offer: &Offer) -> Decision {
@@ -71,6 +77,10 @@ struct Pair {
 }
 
 fn pair(name: &str, accept: bool) -> Pair {
+    pair_claiming(name, accept, None)
+}
+
+fn pair_claiming(name: &str, accept: bool, claim: Option<String>) -> Pair {
     let root = std::env::temp_dir().join(format!("nyx-share-loopback-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("inbox")).unwrap();
@@ -78,6 +88,7 @@ fn pair(name: &str, accept: bool) -> Pair {
     let sender = Identity::load_or_create(&root.join("b")).unwrap();
     let host = Arc::new(TestHost {
         me: info(&receiving, "Receiver"),
+        claim,
         folder: root.join("inbox"),
         accept,
         offers: Mutex::default(),
@@ -170,4 +181,23 @@ fn refuses_a_receiver_with_another_certificate() {
         other => panic!("{other:?}"),
     }
     assert!(p.host.offers.lock().unwrap().is_empty(), "nothing reached the receiver");
+}
+
+#[test]
+fn introduces_itself_to_a_device_it_hasnt_met() {
+    let p = pair("introduce", true);
+    let first = Target { fingerprint: String::new(), addr: IpAddr::V4(Ipv4Addr::LOCALHOST), port: p.receiver.port };
+    let theirs = sender::register(&p.sender, &info(&p.sender, "Sender"), &first).unwrap();
+    assert_eq!(theirs.fingerprint, p.receiver_fp, "learned from the certificate it presented");
+    assert_eq!(theirs.alias, "Receiver");
+}
+
+#[test]
+fn refuses_a_device_claiming_another_key() {
+    let p = pair_claiming("impostor", true, Some("AB".repeat(32)));
+    let first = Target { fingerprint: String::new(), addr: IpAddr::V4(Ipv4Addr::LOCALHOST), port: p.receiver.port };
+    match sender::register(&p.sender, &info(&p.sender, "Sender"), &first) {
+        Err(Error::Failed(m)) => assert!(m.contains("doesn't match"), "{m}"),
+        other => panic!("{other:?}"),
+    }
 }
