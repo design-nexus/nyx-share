@@ -100,5 +100,8 @@ are flattened into the receive folder), and partial acceptance of an offer.
   buses): discovery both ways, port fallback, files byte-identical, text
   message, decline, cancellation on both sides with no partial file left, and
   the Share Sheet prompt.
-- Interoperability with the official LocalSend 1.18.2 app: pending (needs the
-  app opened on the desktop).
+- Interoperability with the official apps: Share → LocalSend 1.18.2 on Linux
+  (two files, byte-identical, pinned mutual TLS, Share on a fallback port), and
+  LocalSend on Android → Share over Tailscale from a public Wi-Fi network that
+  isolates devices (found via the tailnet, offer accepted in the Share window,
+  file saved to Downloads).
