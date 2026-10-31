@@ -5,6 +5,7 @@ members = [
     "crates/nyx-share-dbus",
     "crates/nyx-share-client",
     "crates/nyx-share-providers",
+    "crates/nyx-share-localsend",
     "apps/daemon",
     "apps/share-sheet",
     "apps/cli",
@@ -22,6 +23,7 @@ nyx-share-core = { path = "crates/nyx-share-core" }
 nyx-share-dbus = { path = "crates/nyx-share-dbus" }
 nyx-share-client = { path = "crates/nyx-share-client" }
 nyx-share-providers = { path = "crates/nyx-share-providers" }
+nyx-share-localsend = { path = "crates/nyx-share-localsend" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

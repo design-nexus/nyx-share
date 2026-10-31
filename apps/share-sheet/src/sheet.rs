@@ -81,7 +81,7 @@ pub fn open(app: &gtk::Application, request: String, token: String) {
     );
 }
 
-fn window(app: &gtk::Application) -> (gtk::ApplicationWindow, nyx_ui::chrome::AppHeader, gtk::Box) {
+pub(crate) fn window(app: &gtk::Application) -> (gtk::ApplicationWindow, nyx_ui::chrome::AppHeader, gtk::Box) {
     let window = gtk::ApplicationWindow::builder().application(app).title("Share").resizable(false).build();
     window.add_css_class("share-window");
     let header = nyx_ui::chrome::app_header(&window, "send-to-symbolic", "Share");
@@ -124,7 +124,7 @@ fn remove_window_controls(header: &gtk::WindowHandle) {
     }
 }
 
-fn failed(app: &gtk::Application, message: &str) {
+pub(crate) fn failed(app: &gtk::Application, message: &str) {
     let (window, _, body) = window(app);
     body.append(&widgets::empty_state(
         "dialog-warning-symbolic",
@@ -218,7 +218,7 @@ fn listen(sheet: &Rc<Sheet>) {
     });
 }
 
-fn section_title(text: &str) -> gtk::Label {
+pub(crate) fn section_title(text: &str) -> gtk::Label {
     let l = widgets::label(text, "share-section-title");
     l.set_xalign(0.0);
     l
@@ -998,6 +998,7 @@ mod tests {
             id: "j".into(),
             destination: "save".into(),
             destination_name: "Save to folder".into(),
+            direction: nyx_share_core::Direction::Send,
             state,
             items: 1,
             bytes_done: done,

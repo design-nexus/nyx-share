@@ -6,7 +6,7 @@ mod folder;
 pub mod process;
 
 pub use clipboard::Clipboard;
-pub use folder::Folder;
+pub use folder::{Folder, free_bytes, save_stream};
 
 use nyx_share_core::{ContentKind, Destination, ItemInfo};
 use std::fs::File;

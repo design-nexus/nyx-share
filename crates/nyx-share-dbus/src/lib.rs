@@ -16,6 +16,8 @@ pub const SHEET_INTERFACE: &str = "io.github.design_nexus.nyx.ShareSheet1";
 /// Environment variables that hand a request to the Share Sheet.
 pub const ENV_REQUEST: &str = "NYX_SHARE_REQUEST";
 pub const ENV_TOKEN: &str = "NYX_SHARE_TOKEN";
+/// Instead of a request: an incoming offer to ask about.
+pub const ENV_INCOMING: &str = "NYX_SHARE_INCOMING";
 
 #[proxy(
     interface = "io.github.design_nexus.nyx.Share1",
@@ -73,6 +75,46 @@ pub trait ShareSheet {
 
     /// The sheet closed. Running jobs continue and notify when they finish.
     fn dismiss(&self, request: &str, token: &str) -> zbus::Result<()>;
+
+    /// JSON [`IncomingInfo`] for an offer from a nearby device.
+    fn get_incoming(&self, session: &str, token: &str) -> zbus::Result<String>;
+
+    /// Accept or decline the offer. Accepting starts the receive job (id = session).
+    fn answer_incoming(&self, session: &str, token: &str, accept: bool) -> zbus::Result<()>;
+
+    /// The sheet closed: an unanswered offer is declined; a transfer continues.
+    fn dismiss_incoming(&self, session: &str, token: &str) -> zbus::Result<()>;
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IncomingFile {
+    pub name: String,
+    pub size: u64,
+    pub mime: String,
+    /// The text of a text message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct IncomingInfo {
+    pub session: String,
+    pub sender: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_model: Option<String>,
+    pub fingerprint: String,
+    /// The sender proved it holds the certificate with this fingerprint.
+    pub verified: bool,
+    pub address: String,
+    pub files: Vec<IncomingFile>,
+    pub total: u64,
+    /// Only text messages: shown, nothing saved.
+    pub message_only: bool,
+    /// `pending`, `accepted`, `declined` or `expired`.
+    pub answer: String,
+    pub folder: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

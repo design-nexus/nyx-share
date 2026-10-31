@@ -1,0 +1,22 @@
+[package]
+name = "nyx-share-localsend"
+description = "LocalSend protocol v2 (discovery, sending, receiving) for Nyx Share"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+nyx-share-core.workspace = true
+nyx-share-providers.workspace = true
+libc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring"] }
+rsa = "0.9"
+rand_core = { version = "0.6", features = ["getrandom"] }
+sha2 = "0.10"
+socket2 = { version = "0.5", features = ["all"] }

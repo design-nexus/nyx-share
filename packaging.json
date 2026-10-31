@@ -27,7 +27,9 @@
       "-p",
       "nyx-share-providers",
       "-p",
-      "nyx-share-client"
+      "nyx-share-client",
+      "-p",
+      "nyx-share-localsend"
     ]
   ]
 }

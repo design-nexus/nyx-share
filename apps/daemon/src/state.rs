@@ -1,10 +1,11 @@
 use crate::{config, notify};
-use nyx_share_core::{ContentKind, Destination, Job, JobState, Preferences, arrange, kinds_of};
+use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, Preferences, arrange, kinds_of};
 use nyx_share_dbus::{INTERFACE, PATH};
+use nyx_share_localsend::{Nearby, Offer};
 use nyx_share_providers::{Payload, Provider, SendError, SendOptions, Task};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zbus::fdo;
 
@@ -18,19 +19,44 @@ pub struct Request {
     pub jobs: Vec<String>,
 }
 
+/// What became of an incoming offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Answer {
+    Pending,
+    Accepted,
+    Declined,
+    Expired,
+}
+
+/// An offer from a nearby device, shown in a Share Sheet. Keyed by session id,
+/// which is also the id of its receive job.
+pub struct Incoming {
+    pub token: String,
+    pub offer: Offer,
+    pub answer: Answer,
+    /// The sheet showing it has closed.
+    pub dismissed: bool,
+    pub folder: String,
+}
+
 struct Entry {
     job: Job,
     cancel: Arc<AtomicBool>,
     /// Notify when it finishes (false while a Share Sheet shows it).
     notify: bool,
+    last_emit: Instant,
 }
 
 pub struct State {
-    providers: Vec<Box<dyn Provider>>,
+    providers: RwLock<Vec<Arc<dyn Provider>>>,
     prefs: Mutex<Preferences>,
     pub requests: Mutex<HashMap<String, Request>>,
+    pub incoming: Mutex<HashMap<String, Incoming>>,
+    pub answered: Condvar,
     jobs: Mutex<Vec<Entry>>,
     bus: OnceLock<zbus::Connection>,
+    pub nearby: OnceLock<Arc<Nearby>>,
     last_activity: Mutex<Instant>,
 }
 
@@ -39,7 +65,7 @@ const HISTORY: usize = 50;
 /// An unanswered Share Sheet request is dropped after this long.
 const REQUEST_LIFETIME: Duration = Duration::from_secs(30 * 60);
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -48,19 +74,26 @@ fn now() -> i64 {
 }
 
 impl State {
-    pub fn new(providers: Vec<Box<dyn Provider>>, prefs: Preferences) -> Self {
+    pub fn new(providers: Vec<Arc<dyn Provider>>, prefs: Preferences) -> Self {
         Self {
-            providers,
+            providers: RwLock::new(providers),
             prefs: Mutex::new(prefs),
             requests: Mutex::new(HashMap::new()),
+            incoming: Mutex::new(HashMap::new()),
+            answered: Condvar::new(),
             jobs: Mutex::new(Vec::new()),
             bus: OnceLock::new(),
+            nearby: OnceLock::new(),
             last_activity: Mutex::new(Instant::now()),
         }
     }
 
     pub fn attach(&self, conn: zbus::Connection) {
         let _ = self.bus.set(conn);
+    }
+
+    pub fn add_provider(&self, provider: Arc<dyn Provider>) {
+        self.providers.write().unwrap_or_else(|e| e.into_inner()).push(provider);
     }
 
     pub fn touch(&self) {
@@ -72,22 +105,26 @@ impl State {
     }
 
     pub fn busy(&self) -> bool {
-        !lock(&self.requests).is_empty() || lock(&self.jobs).iter().any(|e| !e.job.state.finished())
+        !lock(&self.requests).is_empty()
+            || lock(&self.incoming).values().any(|i| !i.dismissed || i.answer == Answer::Pending)
+            || lock(&self.jobs).iter().any(|e| !e.job.state.finished())
+            || self.nearby.get().is_some_and(|n| n.busy())
     }
 
     pub fn expire_requests(&self) {
         let running: Vec<String> =
             lock(&self.jobs).iter().filter(|e| !e.job.state.finished()).map(|e| e.job.id.clone()).collect();
         lock(&self.requests).retain(|_, r| r.created.elapsed() < REQUEST_LIFETIME || r.jobs.iter().any(|j| running.contains(j)));
+        lock(&self.incoming).retain(|id, i| !i.dismissed || running.contains(id));
     }
 
-    pub fn providers(&self) -> &[Box<dyn Provider>] {
-        &self.providers
+    pub fn providers(&self) -> Vec<Arc<dyn Provider>> {
+        self.providers.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Every destination, arranged by the user's preferences.
     pub fn destinations(&self) -> Vec<Destination> {
-        let all = self.providers.iter().flat_map(|p| p.destinations()).collect();
+        let all = self.providers().iter().flat_map(|p| p.destinations()).collect();
         arrange(all, &lock(&self.prefs))
     }
 
@@ -110,9 +147,15 @@ impl State {
     }
 
     pub fn cancel(&self, id: &str) -> bool {
-        let jobs = lock(&self.jobs);
-        let Some(e) = jobs.iter().find(|e| e.job.id == id) else { return false };
-        e.cancel.store(true, Ordering::Relaxed);
+        let receiving = {
+            let jobs = lock(&self.jobs);
+            let Some(e) = jobs.iter().find(|e| e.job.id == id) else { return false };
+            e.cancel.store(true, Ordering::Relaxed);
+            e.job.direction == Direction::Receive
+        };
+        if receiving && let Some(n) = self.nearby.get() {
+            n.cancel_incoming(id);
+        }
         true
     }
 
@@ -123,6 +166,36 @@ impl State {
         }
     }
 
+    fn add(&self, job: Job, cancel: Arc<AtomicBool>, notify: bool) {
+        let mut jobs = lock(&self.jobs);
+        jobs.push(Entry { job, cancel, notify, last_emit: Instant::now() });
+        let mut excess = jobs.iter().filter(|e| e.job.state.finished()).count().saturating_sub(HISTORY);
+        jobs.retain(|e| {
+            let old = excess > 0 && e.job.state.finished();
+            excess -= old as usize;
+            !old
+        });
+    }
+
+    /// Change a job; signal it now if `force`, else at most five times a second.
+    fn update(&self, id: &str, force: bool, change: impl FnOnce(&mut Job)) -> Option<(Job, bool)> {
+        let (job, notify, emit) = {
+            let mut jobs = lock(&self.jobs);
+            let e = jobs.iter_mut().find(|e| e.job.id == id)?;
+            change(&mut e.job);
+            e.job.updated = now();
+            let emit = force || e.last_emit.elapsed() >= Duration::from_millis(200);
+            if emit {
+                e.last_emit = Instant::now();
+            }
+            (e.job.clone(), e.notify, emit)
+        };
+        if emit {
+            self.emit(&job);
+        }
+        Some((job, notify))
+    }
+
     /// Check a destination can take `items` and start sending on a worker thread.
     pub fn start(
         self: &Arc<Self>,
@@ -131,11 +204,10 @@ impl State {
         options: SendOptions,
         notify: bool,
     ) -> fdo::Result<String> {
-        let (index, dest) = self
-            .providers
-            .iter()
-            .enumerate()
-            .find_map(|(i, p)| p.destinations().into_iter().find(|d| d.id == destination).map(|d| (i, d)))
+        let (provider, dest) = self
+            .providers()
+            .into_iter()
+            .find_map(|p| p.destinations().into_iter().find(|d| d.id == destination).map(|d| (p.clone(), d)))
             .ok_or_else(|| fdo::Error::UnknownObject(format!("There is no destination called {destination}")))?;
         if !dest.available {
             return Err(fdo::Error::Failed(dest.status.unwrap_or_else(|| format!("{} isn't available", dest.name))));
@@ -153,6 +225,7 @@ impl State {
             id: id.clone(),
             destination: dest.id.clone(),
             destination_name: dest.name.clone(),
+            direction: Direction::Send,
             state: JobState::Running,
             items: items.len() as u32,
             bytes_done: 0,
@@ -163,72 +236,121 @@ impl State {
             updated: t,
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        {
-            let mut jobs = lock(&self.jobs);
-            jobs.push(Entry { job: job.clone(), cancel: cancel.clone(), notify });
-            let mut excess = jobs.iter().filter(|e| e.job.state.finished()).count().saturating_sub(HISTORY);
-            jobs.retain(|e| {
-                let old = excess > 0 && e.job.state.finished();
-                excess -= old as usize;
-                !old
-            });
-        }
+        self.add(job, cancel.clone(), notify);
         let state = self.clone();
-        let dest_id = dest.id.clone();
-        std::thread::spawn(move || state.run(index, &dest_id, &id, &items, &options, &cancel));
-        Ok(job.id)
+        let (dest_id, job_id) = (dest.id.clone(), id.clone());
+        std::thread::spawn(move || state.run(provider, &dest_id, &job_id, &items, &options, &cancel));
+        Ok(id)
     }
 
-    fn run(&self, provider: usize, destination: &str, id: &str, items: &[Payload], options: &SendOptions, cancel: &AtomicBool) {
+    fn run(
+        &self,
+        provider: Arc<dyn Provider>,
+        destination: &str,
+        id: &str,
+        items: &[Payload],
+        options: &SendOptions,
+        cancel: &AtomicBool,
+    ) {
         if let Some(job) = self.job(id) {
             self.emit(&job);
         }
-        let started = Instant::now();
-        let last_emit = AtomicU64::new(0);
         let progress = |bytes: u64| {
-            let job = {
-                let mut jobs = lock(&self.jobs);
-                let Some(e) = jobs.iter_mut().find(|e| e.job.id == id) else { return };
-                e.job.bytes_done += bytes;
-                e.job.updated = now();
-                e.job.clone()
-            };
-            // At most five progress signals a second.
-            let ms = started.elapsed().as_millis() as u64;
-            if ms.saturating_sub(last_emit.load(Ordering::Relaxed)) >= 200 {
-                last_emit.store(ms, Ordering::Relaxed);
-                self.emit(&job);
-            }
+            self.update(id, false, |j| j.bytes_done += bytes);
         };
         let task = Task { items, options, cancel, progress: &progress };
-        let result = self.providers[provider].send(destination, &task);
-        let (job, notify) = {
-            let mut jobs = lock(&self.jobs);
-            let Some(e) = jobs.iter_mut().find(|e| e.job.id == id) else { return };
-            match result {
-                Ok(outcome) => {
-                    e.job.state = JobState::Completed;
-                    e.job.bytes_done = e.job.bytes_total;
-                    e.job.message = Some(outcome.message);
-                    e.job.outputs = outcome.outputs;
-                }
-                Err(SendError::Cancelled { outputs }) => {
-                    e.job.state = JobState::Cancelled;
-                    e.job.message = Some("Cancelled".into());
-                    e.job.outputs = outputs;
-                }
-                Err(SendError::Failed { message, outputs }) => {
-                    e.job.state = JobState::Failed;
-                    e.job.message = Some(message);
-                    e.job.outputs = outputs;
-                }
+        let result = provider.send(destination, &task);
+        let finished = self.update(id, true, |j| match result {
+            Ok(outcome) => {
+                j.state = JobState::Completed;
+                j.bytes_done = j.bytes_total;
+                j.message = Some(outcome.message);
+                j.outputs = outcome.outputs;
             }
-            e.job.updated = now();
-            (e.job.clone(), e.notify)
-        };
-        self.emit(&job);
-        if notify && job.state != JobState::Cancelled {
+            Err(SendError::Cancelled { outputs }) => {
+                j.state = JobState::Cancelled;
+                j.message = Some("Cancelled".into());
+                j.outputs = outputs;
+            }
+            Err(SendError::Failed { message, outputs }) => {
+                j.state = JobState::Failed;
+                j.message = Some(message);
+                j.outputs = outputs;
+            }
+        });
+        if let Some((job, true)) = finished
+            && job.state != JobState::Cancelled
+        {
             self.notify(&job);
+        }
+        self.touch();
+    }
+
+    /// A nearby device's accepted offer becomes a receive job (id = session).
+    pub fn begin_receive(&self, offer: &Offer) {
+        let t = now();
+        let job = Job {
+            id: offer.session.clone(),
+            destination: format!("{}{}", nyx_share_localsend::PREFIX, offer.sender.fingerprint.to_ascii_uppercase()),
+            destination_name: offer.sender.alias.clone(),
+            direction: Direction::Receive,
+            state: JobState::Running,
+            items: offer.files.len() as u32,
+            bytes_done: 0,
+            bytes_total: offer.total,
+            message: None,
+            outputs: Vec::new(),
+            created: t,
+            updated: t,
+        };
+        let watched = lock(&self.incoming).get(&offer.session).is_some_and(|i| !i.dismissed);
+        self.add(job.clone(), Arc::new(AtomicBool::new(false)), !watched);
+        self.emit(&job);
+        self.touch();
+    }
+
+    pub fn receive_progress(&self, session: &str, bytes: u64) {
+        self.update(session, false, |j| j.bytes_done += bytes);
+    }
+
+    pub fn received(&self, session: &str, path: String) {
+        self.update(session, true, |j| j.outputs.push(path));
+    }
+
+    pub fn end_receive(&self, session: &str, end: nyx_share_localsend::End) {
+        use nyx_share_localsend::End;
+        let finished = self.update(session, true, |j| match end {
+            End::Completed => {
+                j.state = JobState::Completed;
+                j.bytes_done = j.bytes_total;
+                let what = if j.items == 1 { "1 file".to_string() } else { format!("{} files", j.items) };
+                j.message = Some(format!("Received {what} from {}", j.destination_name));
+            }
+            End::Cancelled => {
+                j.state = JobState::Cancelled;
+                j.message = Some("Cancelled".into());
+            }
+            End::Failed(reason) => {
+                j.state = JobState::Failed;
+                j.message = Some(reason);
+            }
+        });
+        if let Some((job, true)) = finished {
+            match job.state {
+                JobState::Completed => {
+                    let folder =
+                        job.outputs.first().and_then(|p| std::path::Path::new(p).parent()).map(|p| p.display().to_string());
+                    self.notify_text(
+                        job.message.as_deref().unwrap_or_default(),
+                        &folder.map(|f| format!("Saved in {f}")).unwrap_or_default(),
+                    );
+                }
+                JobState::Failed => self.notify_text(
+                    &format!("Couldn't receive from {}", job.destination_name),
+                    job.message.as_deref().unwrap_or_default(),
+                ),
+                _ => {}
+            }
         }
         self.touch();
     }
@@ -240,12 +362,23 @@ impl State {
             async_io::block_on(conn.emit_signal(None::<&str>, PATH, INTERFACE, "JobChanged", &(job.id.as_str(), json.as_str())));
     }
 
+    pub fn destinations_changed(&self) {
+        if let Some(conn) = self.bus.get() {
+            let _ = async_io::block_on(conn.emit_signal(None::<&str>, PATH, INTERFACE, "DestinationsChanged", &()));
+        }
+    }
+
+    pub fn notify_text(&self, summary: &str, body: &str) {
+        if let Some(conn) = self.bus.get() {
+            notify::send(conn, summary, body);
+        }
+    }
+
     fn notify(&self, job: &Job) {
-        let Some(conn) = self.bus.get() else { return };
         let message = job.message.as_deref().unwrap_or_default();
         match job.state {
-            JobState::Completed => notify::send(conn, message, ""),
-            _ => notify::send(conn, &format!("Couldn't share with {}", job.destination_name), message),
+            JobState::Completed => self.notify_text(message, ""),
+            _ => self.notify_text(&format!("Couldn't share with {}", job.destination_name), message),
         }
     }
 }

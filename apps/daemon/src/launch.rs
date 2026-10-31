@@ -1,4 +1,4 @@
-use nyx_share_dbus::{ENV_REQUEST, ENV_TOKEN};
+use nyx_share_dbus::{ENV_INCOMING, ENV_REQUEST, ENV_TOKEN};
 use nyx_share_providers::process;
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -16,9 +16,18 @@ fn sheet_binary() -> Option<PathBuf> {
 
 /// Open the Share Sheet for a request. The id and token go in its environment.
 pub fn sheet(request: &str, token: &str) -> Result<(), String> {
+    open(ENV_REQUEST, request, token)
+}
+
+/// Open the Share Sheet to ask about an incoming offer.
+pub fn incoming(session: &str, token: &str) -> Result<(), String> {
+    open(ENV_INCOMING, session, token)
+}
+
+fn open(var: &str, id: &str, token: &str) -> Result<(), String> {
     let binary = sheet_binary().ok_or_else(|| "The Share Sheet isn't installed".to_string())?;
     let mut child = process::detached(&binary)
-        .env(ENV_REQUEST, request)
+        .env(var, id)
         .env(ENV_TOKEN, token)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

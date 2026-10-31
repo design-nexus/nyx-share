@@ -14,11 +14,17 @@ cloud service, account or relay.
 | --- | --- | --- |
 | Copy (clipboard) | One text, link or image | Through `wl-copy`; the content stays on the clipboard after the service exits. |
 | Save to folder | Any number of files, images and texts | Copies into a folder you pick. Never moves or overwrites: a taken name becomes `name (2).ext`. |
+| Nearby devices | Files, images, text and links | Phones, tablets and computers running LocalSend on your network, over encrypted connections pinned to each device's key. |
+
+While the service runs (when you share, and for a minute after), this computer
+is visible to nearby LocalSend devices and can receive from them. Every
+incoming offer asks you first, in the Share Sheet; accepted files go to your
+Downloads folder. See [LOCALSEND.md](docs/LOCALSEND.md).
 
 Transfers run in the service, so closing the Share Sheet doesn't stop them, and
-the service notifies you when one finishes after the sheet has closed. Nearby
-sharing (LocalSend), your computers over LAN or Tailscale, NAS folders, phones
-through Flux, Nyx app destinations and the Settings page are planned; see
+the service notifies you when one finishes after the sheet has closed. Your
+computers over LAN or Tailscale, NAS folders, phones through Flux, Nyx app
+destinations and the Settings page are planned; see
 [the roadmap](docs/ROADMAP.md). Nothing in the sheet appears for a destination
 that doesn't exist yet.
 
@@ -86,7 +92,9 @@ integration audit is [docs/AUDIT.md](docs/AUDIT.md).
 The service keeps your arrangement (order, pinned and hidden destinations) in
 `~/.config/nyx-share/destinations.toml`; change it from the sheet's context menu
 or over D-Bus. The sheet remembers the last Save to folder location in
-`~/.config/nyx-share/settings.toml`.
+`~/.config/nyx-share/settings.toml`. Nearby sharing reads
+`~/.config/nyx-share/nearby.toml` (visibility, the name others see, the receive
+folder); see [LOCALSEND.md](docs/LOCALSEND.md).
 
 ## Build and test
 

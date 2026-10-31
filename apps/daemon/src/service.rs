@@ -1,7 +1,7 @@
-use crate::state::{Request, State};
+use crate::state::{Answer, Request, State, lock};
 use crate::{caller, items, launch};
 use nyx_share_core::{API_VERSION, ContentKind, Limits, PreferencesUpdate, kinds_of};
-use nyx_share_dbus::{Capabilities, ProviderInfo, RequestInfo, ShareOptions};
+use nyx_share_dbus::{Capabilities, IncomingFile, IncomingInfo, ProviderInfo, RequestInfo, ShareOptions};
 use nyx_share_providers::{Payload, SendOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -116,6 +116,9 @@ impl Share1 {
                 jobs: Vec::new(),
             },
         );
+        if let Some(n) = self.0.nearby.get() {
+            n.scan();
+        }
         if let Err(e) = launch::sheet(&id, &token) {
             self.0.requests.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
             return Err(fdo::Error::Failed(e));
@@ -246,4 +249,64 @@ impl Sheet1 {
         self.0.release(&jobs);
         Ok(())
     }
+
+    fn get_incoming(&self, session: &str, token: &str) -> fdo::Result<String> {
+        self.0.touch();
+        let incoming = lock(&self.0.incoming);
+        let i = incoming.get(session).filter(|i| same(&i.token, token)).ok_or_else(ended)?;
+        let o = &i.offer;
+        let info = IncomingInfo {
+            session: o.session.clone(),
+            sender: o.sender.alias.clone(),
+            device_type: o.sender.device_type.clone(),
+            device_model: o.sender.device_model.clone(),
+            fingerprint: o.sender.fingerprint.to_ascii_uppercase(),
+            verified: o.verified,
+            address: o.addr.to_string(),
+            files: o
+                .files
+                .iter()
+                .map(|f| IncomingFile {
+                    name: f.file_name.clone(),
+                    size: f.size,
+                    mime: f.file_type.clone(),
+                    text: f.preview.clone().filter(|_| f.file_type.starts_with("text/")),
+                })
+                .collect(),
+            total: o.total,
+            message_only: o.message_only,
+            answer: serde_json::to_value(i.answer).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default(),
+            folder: i.folder.clone(),
+        };
+        Ok(json(&info))
+    }
+
+    fn answer_incoming(&self, session: &str, token: &str, accept: bool) -> fdo::Result<()> {
+        self.0.touch();
+        let mut incoming = lock(&self.0.incoming);
+        let i = incoming.get_mut(session).filter(|i| same(&i.token, token)).ok_or_else(ended)?;
+        if i.answer != Answer::Pending {
+            return Err(fdo::Error::Failed("This request was already answered or has expired".into()));
+        }
+        i.answer = if accept { Answer::Accepted } else { Answer::Declined };
+        self.0.answered.notify_all();
+        Ok(())
+    }
+
+    fn dismiss_incoming(&self, session: &str, token: &str) -> fdo::Result<()> {
+        let mut incoming = lock(&self.0.incoming);
+        let i = incoming.get_mut(session).filter(|i| same(&i.token, token)).ok_or_else(ended)?;
+        i.dismissed = true;
+        if i.answer == Answer::Pending {
+            i.answer = Answer::Declined;
+            self.0.answered.notify_all();
+        }
+        drop(incoming);
+        self.0.release(&[session.to_string()]);
+        Ok(())
+    }
+}
+
+fn ended() -> fdo::Error {
+    fdo::Error::AccessDenied("This share request has ended".into())
 }

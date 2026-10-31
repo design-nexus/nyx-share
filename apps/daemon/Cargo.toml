@@ -15,6 +15,7 @@ path = "src/main.rs"
 nyx-share-core.workspace = true
 nyx-share-dbus.workspace = true
 nyx-share-providers.workspace = true
+nyx-share-localsend.workspace = true
 anyhow.workspace = true
 async-io.workspace = true
 libc.workspace = true

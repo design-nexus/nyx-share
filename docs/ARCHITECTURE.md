@@ -21,6 +21,7 @@ flowchart LR
 | `nyx-share-dbus` | Bus name, object path, zbus proxies for `Share1` and `ShareSheet1`, and the JSON wire types. |
 | `nyx-share-client` | The public blocking client: opens files read-only and sends descriptors, waits on jobs, streams events. zbus with its default async-io runtime; no GTK, no tokio. |
 | `nyx-share-providers` | The `Provider` trait and the built-in destinations. |
+| `nyx-share-localsend` | LocalSend v2: identity, TLS, discovery, sender, receiver, and the Nearby provider. |
 | `apps/daemon` | `nyx-share-daemon`: owns requests, jobs, providers and the destination arrangement. |
 | `apps/share-sheet` | `nyx-share-sheet`: the GTK 4 window. Stateless; everything comes from the service. |
 | `apps/cli` | `nyx-share`. |

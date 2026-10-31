@@ -8,7 +8,7 @@
 | — | Clipboard and Save to folder | Done and checked end to end |
 | — | `nyx share` in the umbrella CLI, suite.toml entry | Done (nyx umbrella) |
 | — | Nyx Files: Share… and Send to → Share | Done through the Files provider protocol (`nyx-share files-provider`); protocol checked end to end, the menu itself to be looked at in Files. A flat Send to → G16 Laptop needs a Files change |
-| 3 | LocalSend nearby sharing, receiving with confirmation | Planned: [LOCALSEND.md](LOCALSEND.md) |
+| 3 | LocalSend nearby sharing, receiving with confirmation | Done and checked against itself over the network ([LOCALSEND.md](LOCALSEND.md)); interoperability with the official app pending |
 | 4 | My Computers over LAN and Tailscale | Planned (builds on Phase 3) |
 | 5 | NAS destinations | Planned: [NAS.md](NAS.md); needs nyx-transfer additions |
 | 6 | Flux phones | Planned: [FLUX.md](FLUX.md) |

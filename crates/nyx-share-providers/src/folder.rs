@@ -114,6 +114,60 @@ fn save(dir: &Path, name: &str, item: &Payload, task: &Task<'_>) -> Result<PathB
     result
 }
 
+/// Save a stream of `size` bytes into `dir` under `name` (already sanitized),
+/// or the first free alternative, through a partial file that is removed on
+/// failure. Used for files received from other devices.
+pub fn save_stream(
+    dir: &Path,
+    name: &str,
+    reader: &mut dyn std::io::Read,
+    size: u64,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &(dyn Fn(u64) + Sync),
+) -> Result<PathBuf, SendError> {
+    let partial = dir.join(names::partial(name, &tag()));
+    let mut out =
+        OpenOptions::new().write(true).create_new(true).open(&partial).map_err(|e| SendError::failed(write_error(&e)))?;
+    let copied = (|| {
+        let mut buf = vec![0u8; 1 << 20];
+        let mut total = 0u64;
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(SendError::Cancelled { outputs: Vec::new() });
+            }
+            let n = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(SendError::failed(format!("The transfer broke off: {e}"))),
+            };
+            total += n as u64;
+            if total > size {
+                return Err(SendError::failed("More data arrived than was announced"));
+            }
+            out.write_all(&buf[..n]).map_err(|e| SendError::failed(write_error(&e)))?;
+            progress(n as u64);
+        }
+        if total != size {
+            return Err(SendError::failed("The transfer ended early"));
+        }
+        out.sync_all().map_err(|e| SendError::failed(write_error(&e)))
+    })();
+    drop(out);
+    let result = copied.and_then(|()| place(&partial, dir, name));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    } else if let Ok(d) = File::open(dir) {
+        let _ = d.sync_all();
+    }
+    result
+}
+
+/// Free bytes in the filesystem holding `dir`.
+pub fn free_bytes(dir: &Path) -> Option<u64> {
+    free_space(dir)
+}
+
 fn write_all(out: &mut File, item: &Payload, task: &Task<'_>) -> Result<(), SendError> {
     match &item.data {
         Data::Text(text) => {

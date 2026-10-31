@@ -28,7 +28,9 @@ fn service() -> &'static Service {
     S.get_or_init(|| {
         assert!(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some(), "run under dbus-run-session");
         let root = std::env::temp_dir().join(format!("nyx-share-service-{}", std::process::id()));
-        std::fs::create_dir_all(root.join("config")).unwrap();
+        std::fs::create_dir_all(root.join("config/nyx-share")).unwrap();
+        // Nothing on the real network: no discovery, no receiver.
+        std::fs::write(root.join("config/nyx-share/nearby.toml"), "visibility = \"off\"\n").unwrap();
         let sheet = root.join("fake-sheet");
         std::fs::write(&sheet, format!("#!/bin/sh\nenv | grep '^NYX_SHARE_' > '{}/sheet-env'\n", root.display())).unwrap();
         std::fs::set_permissions(&sheet, std::fs::Permissions::from_mode(0o755)).unwrap();

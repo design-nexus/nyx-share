@@ -157,3 +157,19 @@ window.share-window .share-note {
 window.share-window .share-note image {
   color: @theme_text_tertiary;
 }
+
+window.share-window .incoming-files {
+  padding: 4px 0;
+}
+
+window.share-window .incoming-file {
+  padding: 7px 14px;
+}
+
+window.share-window .incoming-message {
+  padding: 10px 14px;
+}
+
+window.share-window .incoming-buttons {
+  margin-top: 14px;
+}

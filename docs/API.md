@@ -75,7 +75,9 @@ available.
 ```
 
 `state` is `queued`, `running`, `completed`, `failed` or `cancelled`; `message`
-is a sentence for people; `outputs` lists what was created.
+is a sentence for people; `outputs` lists what was created. `direction` is
+`send`, or `receive` for files arriving from a nearby device (then
+`destination_name` is the sender).
 
 ## Errors
 
@@ -118,6 +120,10 @@ dbus-run-session -- cargo test -p nyx-share-client --test service -- --ignored -
 
 Used only by `nyx-share-sheet`; not stable. `GetRequest(s request, s token) → s`,
 `OpenItem(s, s, u index) → h` (images only, read-only), `Choose(s, s, s destination,
-s options) → s job`, `Dismiss(s, s)`. The id and token reach the sheet in
-`NYX_SHARE_REQUEST` and `NYX_SHARE_TOKEN`. For checks, `NYX_SHARE_CHECK_CHOOSE`
-(`save:/path;clipboard`) makes the sheet choose destinations as if clicked.
+s options) → s job`, `Dismiss(s, s)`. For offers from nearby devices:
+`GetIncoming(s session, s token) → s`, `AnswerIncoming(s, s, b accept)` and
+`DismissIncoming(s, s)` (declines an unanswered offer). The id and token reach
+the sheet in `NYX_SHARE_REQUEST` or `NYX_SHARE_INCOMING`, and `NYX_SHARE_TOKEN`.
+For checks, `NYX_SHARE_CHECK_CHOOSE` (`save:/path;clipboard`) makes the sheet
+choose destinations as if clicked, and `NYX_SHARE_CHECK_ANSWER` (`accept` or
+`decline`) answers an offer after two seconds.

@@ -37,11 +37,15 @@ remote device without explicit trust (from Phase 3).
 
 - Same-user processes can call the service like any app; this is inherent to a
   session service.
-- Received files and remote devices don't exist yet. Before Phase 3 ships:
-  incoming-transfer confirmation by default, certificate-pinned device
-  identity (never a hostname or IP alone), explicit trust for unattended
-  transfers, per-transfer size limits and path-traversal tests for received
-  names. Received files are never opened automatically.
+- Nearby sharing (LocalSend) is described in [LOCALSEND.md](LOCALSEND.md). In
+  short: every incoming offer needs your acceptance (no unattended receiving
+  yet); senders pin the receiver's certificate; senders' certificates are
+  checked against what they claim; received names are sanitized and never
+  replace a file; offers are refused when the receive folder lacks the space
+  (plus a 512 MB reserve) or carry more than 1,000 files; uploads are only taken
+  from the address and with the per-file tokens of the accepted session;
+  received files are never opened automatically. The receiver listens only
+  while the service runs, unless `visibility = "off"` turns it off.
 - External providers are not implemented; they will run out of process with
   enforced permissions (see [PROVIDERS.md](PROVIDERS.md)).
 

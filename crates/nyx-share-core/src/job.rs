@@ -16,11 +16,22 @@ impl JobState {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Direction {
+    #[default]
+    Send,
+    /// Files arriving from another device; `destination_name` is the sender.
+    Receive,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Job {
     pub id: String,
     pub destination: String,
     pub destination_name: String,
+    #[serde(default)]
+    pub direction: Direction,
     pub state: JobState,
     pub items: u32,
     pub bytes_done: u64,
