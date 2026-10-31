@@ -1,5 +1,7 @@
 //! nyx-share: share from the command line through the Nyx Share service.
 
+mod files_provider;
+
 use nyx_share_client::{Client, Content, Error, Job, JobState, ShareOptions};
 use nyx_share_core::units;
 use std::io::{IsTerminal, Write};
@@ -92,6 +94,8 @@ fn run(args: &[String]) -> Result<ExitCode, Error> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        // Started by Nyx Files from its provider registration; not for people.
+        Some("files-provider") => Ok(files_provider::run()),
         Some("cancel") => {
             let id = args.get(1).ok_or_else(|| Error::Refused("Which job? See `nyx-share jobs`.".into()))?;
             Client::connect()?.cancel(id)?;

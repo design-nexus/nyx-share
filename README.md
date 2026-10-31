@@ -55,6 +55,15 @@ to print the job id and return. In the sheet, arrow keys move between
 destinations, Enter shares, the context menu (right-click, Menu or Shift+F10)
 pins, hides and reorders, Ctrl+←/→ moves the focused destination, and Esc closes.
 
+## In Nyx Files
+
+The installer registers a Nyx Files provider. After you reopen Files, a file's
+context menu has **Share…** (the Share Sheet for the selection) and, when a
+destination can take the selection without asking anything, **Send to… → Share →**
+that destination (today, **Copy** for a single image). Folders aren't offered
+yet. The registration is `~/.config/nyx-files/providers/nyx-share/`; delete it,
+or add an empty `disabled` file beside it, to turn this off.
+
 ## For app developers
 
 Apps call the service over D-Bus, with files passed as read-only file

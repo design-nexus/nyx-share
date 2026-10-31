@@ -32,6 +32,26 @@ install -Dm644 "$root/data/icons/io.github.design_nexus.nyx.Share.svg" "$share/i
 if command -v update-desktop-database >/dev/null; then update-desktop-database "$share/applications"; fi
 if command -v systemctl >/dev/null; then systemctl --user daemon-reload 2>/dev/null || true; fi
 
+# Nyx Files: Share… and Send to → Share. Files reads providers when it starts.
+providers="$config/nyx-files/providers/nyx-share"
+install -d -m755 "$providers"
+install -m644 "$root/data/files-provider/share.png" "$providers/share.png"
+home_json=${HOME//\\/\\\\}
+home_json=${home_json//\"/\\\"}
+cat > "$providers/provider.json.new" <<EOF
+{
+  "version": 1,
+  "id": "nyx-share",
+  "name": "Share",
+  "command": ["$home_json/.local/bin/nyx-share", "files-provider"],
+  "icon": "share",
+  "icons": {"share": "share.png"},
+  "category": "other"
+}
+EOF
+chmod 644 "$providers/provider.json.new"
+mv -f "$providers/provider.json.new" "$providers/provider.json"
+
 # The service starts when an app shares and exits after a minute idle, so a
 # running copy picks up this version once its transfers finish.
 printf 'Installed Share without opening it. Try: nyx-share --help\n'
