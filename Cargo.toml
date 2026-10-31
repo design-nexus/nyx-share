@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/nyx-share-core",
+    "crates/nyx-share-dbus",
+    "crates/nyx-share-client",
+    "crates/nyx-share-providers",
+    "apps/daemon",
+    "apps/share-sheet",
+    "apps/cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Ken Smith"]
+repository = "https://github.com/design-nexus/nyx-share"
+
+[workspace.dependencies]
+nyx-share-core = { path = "crates/nyx-share-core" }
+nyx-share-dbus = { path = "crates/nyx-share-dbus" }
+nyx-share-client = { path = "crates/nyx-share-client" }
+nyx-share-providers = { path = "crates/nyx-share-providers" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+uuid = { version = "1", features = ["v4"] }
+libc = "0.2"
+# The default async-io runtime: the client must not force tokio on the apps that link it.
+zbus = "5"
+async-io = "2"
+async-channel = "2"
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "5c4172947c18876c05d3173d2ebe2a1e434b098b" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "5c4172947c18876c05d3173d2ebe2a1e434b098b" }
+
+[profile.release]
+lto = "thin"
+strip = true

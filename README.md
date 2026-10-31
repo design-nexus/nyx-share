@@ -1,0 +1,94 @@
+# Share
+
+One Share Sheet for the Nyx suite and any Linux app: send files, images, text and
+links to destinations without each app building its own sharing. Nyx Share is a
+session D-Bus service (`io.github.design_nexus.nyx.Share1`), a GTK 4 Share Sheet
+in Nyx Design 2.0, a command-line tool and a Rust client library. It needs no
+cloud service, account or relay.
+
+![The Share Sheet with three files](docs/screenshots/files-dark.png)
+
+## What works in this release
+
+| Destination | Takes | Notes |
+| --- | --- | --- |
+| Copy (clipboard) | One text, link or image | Through `wl-copy`; the content stays on the clipboard after the service exits. |
+| Save to folder | Any number of files, images and texts | Copies into a folder you pick. Never moves or overwrites: a taken name becomes `name (2).ext`. |
+
+Transfers run in the service, so closing the Share Sheet doesn't stop them, and
+the service notifies you when one finishes after the sheet has closed. Nearby
+sharing (LocalSend), your computers over LAN or Tailscale, NAS folders, phones
+through Flux, Nyx app destinations and the Settings page are planned; see
+[the roadmap](docs/ROADMAP.md). Nothing in the sheet appears for a destination
+that doesn't exist yet.
+
+![Transfers in progress and a failure with Retry](docs/screenshots/transfers-dark.png)
+![A link in the light theme](docs/screenshots/link-light.png)
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/design-nexus/nyx-share/main/install.sh | bash
+```
+
+From a checkout: `./install.sh`. It installs `nyx-share`, `nyx-share-daemon` and
+`nyx-share-sheet` to `~/.local/bin`, the D-Bus activation file, a systemd user
+unit, the icon and a hidden desktop entry. Nothing starts until something shares.
+`./uninstall.sh` removes them (`--purge` also removes your destination arrangement).
+
+Requires Rust 1.99, GTK 4.18, a session bus and, for the clipboard, `wl-clipboard`.
+
+## Use
+
+```sh
+nyx-share ~/Pictures/photo.jpg                 # open the Share Sheet
+nyx-share --text "Hello" --url https://example.com
+nyx-share --to clipboard --url https://example.com
+nyx-share --to save --folder ~/Backups ~/Documents/report.pdf
+nyx-share destinations                          # what is available
+nyx-share jobs                                  # transfers since the service started
+nyx-share cancel JOB
+```
+
+`--to` waits and prints the result (exit status 1 if it fails); add `--no-wait`
+to print the job id and return. In the sheet, arrow keys move between
+destinations, Enter shares, the context menu (right-click, Menu or Shift+F10)
+pins, hides and reorders, Ctrl+←/→ moves the focused destination, and Esc closes.
+
+## For app developers
+
+Apps call the service over D-Bus, with files passed as read-only file
+descriptors, so sandboxed apps work and nothing links to Nyx UI libraries. Rust
+apps can use `nyx-share-client`:
+
+```rust
+use nyx_share_client::{Client, Content, ShareOptions};
+let mut content = Content::new();
+content.file("/home/me/Pictures/photo.jpg")?;
+Client::connect()?.share(&content, &ShareOptions { app_name: Some("Photos".into()), ..Default::default() })?;
+```
+
+See [API.md](docs/API.md) for the interface, [ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[PROVIDERS.md](docs/PROVIDERS.md) and [SECURITY.md](docs/SECURITY.md). The Phase 0
+integration audit is [docs/AUDIT.md](docs/AUDIT.md).
+
+## Configuration
+
+The service keeps your arrangement (order, pinned and hidden destinations) in
+`~/.config/nyx-share/destinations.toml`; change it from the sheet's context menu
+or over D-Bus. The sheet remembers the last Save to folder location in
+`~/.config/nyx-share/settings.toml`.
+
+## Build and test
+
+```sh
+cargo build --workspace
+cargo test -p nyx-share-core -p nyx-share-providers -p nyx-share-client
+cargo build -p nyx-share-daemon && dbus-run-session -- cargo test -p nyx-share-client --test service -- --ignored --test-threads=1
+```
+
+The service check runs the real daemon on a private bus with scratch directories.
+
+## License
+
+MIT

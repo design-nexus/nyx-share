@@ -1,0 +1,159 @@
+window.share-window .share-body {
+  padding: 0 16px 16px 16px;
+}
+
+window.share-window .share-preview {
+  padding: 12px 14px;
+}
+
+window.share-window .preview-thumb {
+  border-radius: 7px;
+  background: alpha(@theme_text, 0.08);
+  color: @theme_dim_text;
+}
+
+window.share-window .preview-title {
+  font-weight: 500;
+}
+
+window.share-window .preview-subtitle {
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+window.share-window .share-section-title {
+  margin: 14px 6px 6px 6px;
+  font-size: 0.846em;
+  font-weight: 600;
+  color: @theme_text_tertiary;
+}
+
+window.share-window flowbox.share-tiles > flowboxchild.dest {
+  padding: 6px 2px 7px 2px;
+  border-radius: var(--nyx-radius-small);
+  outline: none;
+  transition: background-color 120ms ease;
+}
+
+window.share-window flowbox.share-tiles > flowboxchild.dest:hover {
+  background: @row_hover;
+}
+
+window.share-window flowbox.share-tiles > flowboxchild.dest:focus-visible {
+  box-shadow: 0 0 0 2px alpha(@theme_accent, 0.55);
+}
+
+window.share-window .dest-name {
+  font-size: 0.923em;
+  font-weight: 500;
+}
+
+window.share-window .dest-caption {
+  font-size: 0.846em;
+  color: @theme_text_tertiary;
+}
+
+window.share-window .dest.busy .dest-caption {
+  color: @theme_accent;
+}
+
+window.share-window .dest.failed .dest-caption {
+  color: @theme_danger;
+}
+
+window.share-window .dest.unavailable .dest-icon,
+window.share-window .dest.hidden-dest .dest-icon {
+  opacity: 0.45;
+}
+
+window.share-window .dest.unavailable .dest-name,
+window.share-window .dest.hidden-dest .dest-name {
+  color: @theme_dim_text;
+}
+
+window.share-window .dest-ring {
+  color: @theme_accent;
+}
+
+/* Destination tiles are drawn like the Nyx app icons (nyx-icons): the same dark
+   satin plate and light glyphs in every theme. */
+window.share-window .dest-icon {
+  border-radius: 11px;
+  background-image: linear-gradient(135deg, #26262a, #121214);
+  box-shadow: 0 1px 2px alpha(@theme_shadow, 0.3), 0 4px 10px alpha(@theme_shadow, 0.22);
+}
+
+window.share-window .dest-icon.mini {
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+window.share-window .dest-icon.tint-blue {
+  color: #8fb6ff;
+  box-shadow: inset 0 0 0 1px alpha(#8fb6ff, 0.3), 0 1px 2px alpha(@theme_shadow, 0.3), 0 4px 10px alpha(@theme_shadow, 0.22);
+}
+
+window.share-window .dest-icon.tint-green {
+  color: #7fdcaa;
+  box-shadow: inset 0 0 0 1px alpha(#7fdcaa, 0.3), 0 1px 2px alpha(@theme_shadow, 0.3), 0 4px 10px alpha(@theme_shadow, 0.22);
+}
+
+window.share-window .dest-icon.tint-amber {
+  color: #f2c46b;
+  box-shadow: inset 0 0 0 1px alpha(#f2c46b, 0.3), 0 1px 2px alpha(@theme_shadow, 0.3), 0 4px 10px alpha(@theme_shadow, 0.22);
+}
+
+window.share-window .dest-icon.tint-teal {
+  color: #6fd3de;
+  box-shadow: inset 0 0 0 1px alpha(#6fd3de, 0.3), 0 1px 2px alpha(@theme_shadow, 0.3), 0 4px 10px alpha(@theme_shadow, 0.22);
+}
+
+window.share-window .dest-icon.tint-graphite {
+  color: #c3c3cb;
+  box-shadow: inset 0 0 0 1px alpha(#c3c3cb, 0.3), 0 1px 2px alpha(@theme_shadow, 0.3), 0 4px 10px alpha(@theme_shadow, 0.22);
+}
+
+window.share-window .dest-icon.mini.tint-blue,
+window.share-window .dest-icon.mini.tint-green,
+window.share-window .dest-icon.mini.tint-amber,
+window.share-window .dest-icon.mini.tint-teal,
+window.share-window .dest-icon.mini.tint-graphite {
+  box-shadow: none;
+}
+
+window.share-window .share-jobs {
+  padding: 0;
+}
+
+window.share-window .share-job {
+  padding: 11px 10px 11px 14px;
+}
+
+window.share-window .share-job.following {
+  border-top: 1px solid @hairline;
+}
+
+window.share-window .share-job.failed .dest-icon.mini {
+  background-image: none;
+  background: alpha(@theme_danger, 0.16);
+  color: @theme_danger;
+}
+
+window.share-window .job-title {
+  font-weight: 500;
+}
+
+window.share-window .job-caption {
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+window.share-window .share-note {
+  margin: 10px 6px 0 6px;
+  font-size: 0.923em;
+  color: @theme_dim_text;
+}
+
+window.share-window .share-note image {
+  color: @theme_text_tertiary;
+}

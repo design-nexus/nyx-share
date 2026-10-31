@@ -1,0 +1,24 @@
+[package]
+name = "nyx-share-sheet"
+description = "The Nyx Share Sheet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nyx-share-sheet"
+path = "src/main.rs"
+
+[dependencies]
+nyx-share-client.workspace = true
+nyx-share-core.workspace = true
+nyx-share-dbus.workspace = true
+async-channel.workspace = true
+gtk.workspace = true
+nyx-core.workspace = true
+nyx-ui.workspace = true
+nyx-theme.workspace = true
+serde.workspace = true
+serde_json.workspace = true

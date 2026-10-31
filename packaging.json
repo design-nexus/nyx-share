@@ -1,0 +1,33 @@
+{
+  "name": "nyx-share",
+  "version": "0.1.0",
+  "app_id": "io.github.design_nexus.nyx.Share",
+  "description": "Universal sharing for the Nyx suite: a Share Sheet, a D-Bus service and a CLI",
+  "binary": "nyx-share",
+  "categories": [
+    "Utility"
+  ],
+  "application": "share",
+  "directory": ".",
+  "packages": [
+    "nyx-share",
+    "nyx-share-daemon",
+    "nyx-share-sheet"
+  ],
+  "manifest": "Cargo.toml",
+  "prepare": [],
+  "binaries": [],
+  "test_commands": [
+    [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "nyx-share-core",
+      "-p",
+      "nyx-share-providers",
+      "-p",
+      "nyx-share-client"
+    ]
+  ]
+}

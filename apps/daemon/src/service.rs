@@ -1,0 +1,249 @@
+use crate::state::{Request, State};
+use crate::{caller, items, launch};
+use nyx_share_core::{API_VERSION, ContentKind, Limits, PreferencesUpdate, kinds_of};
+use nyx_share_dbus::{Capabilities, ProviderInfo, RequestInfo, ShareOptions};
+use nyx_share_providers::{Payload, SendOptions};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Instant;
+use zbus::message::Header;
+use zbus::object_server::SignalEmitter;
+use zbus::zvariant::OwnedFd;
+use zbus::{Connection, fdo, interface};
+
+fn json<T: serde::Serialize>(v: &T) -> String {
+    serde_json::to_string(v).unwrap_or_default()
+}
+
+fn parse_options(s: &str) -> fdo::Result<ShareOptions> {
+    if s.trim().is_empty() {
+        return Ok(ShareOptions::default());
+    }
+    serde_json::from_str(s).map_err(|e| fdo::Error::InvalidArgs(format!("The options aren't valid JSON: {e}")))
+}
+
+/// A display name for the calling app: short and printable.
+fn app_name(options: &ShareOptions) -> Option<String> {
+    let name: String = options.app_name.as_deref()?.chars().filter(|c| !c.is_control()).take(64).collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+fn send_options(options: &ShareOptions, sandboxed: bool) -> fdo::Result<SendOptions> {
+    let folder = match options.folder.as_deref() {
+        None => None,
+        Some(_) if sandboxed => {
+            return Err(fdo::Error::AccessDenied("Sandboxed apps can't choose a folder; use Share to let the user pick".into()));
+        }
+        Some(f) => {
+            let p = PathBuf::from(f);
+            if !p.is_absolute() {
+                return Err(fdo::Error::InvalidArgs("The folder must be an absolute path".into()));
+            }
+            Some(p)
+        }
+    };
+    Ok(SendOptions { folder })
+}
+
+fn random_token() -> String {
+    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+}
+
+/// Compare without stopping at the first difference.
+fn same(a: &str, b: &str) -> bool {
+    a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+pub struct Share1(pub Arc<State>);
+
+#[interface(name = "io.github.design_nexus.nyx.Share1")]
+impl Share1 {
+    #[zbus(property)]
+    fn version(&self) -> u32 {
+        API_VERSION
+    }
+
+    fn get_capabilities(&self) -> String {
+        self.0.touch();
+        let limits = Limits::default();
+        let providers = self
+            .0
+            .providers()
+            .iter()
+            .map(|p| {
+                let dests = p.destinations();
+                let status = dests.iter().find_map(|d| d.status.clone().filter(|_| !d.available));
+                ProviderInfo {
+                    id: p.id().into(),
+                    name: p.name().into(),
+                    kinds: p.kinds(),
+                    available: dests.iter().any(|d| d.available),
+                    status,
+                }
+            })
+            .collect();
+        json(&Capabilities {
+            version: API_VERSION,
+            providers,
+            max_items: limits.max_items as u32,
+            max_text_bytes: limits.max_text_bytes as u32,
+        })
+    }
+
+    async fn share(
+        &self,
+        items: &str,
+        fds: Vec<OwnedFd>,
+        options: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<String> {
+        self.0.touch();
+        let caller = caller::identify(conn, &header).await?;
+        let options = parse_options(options)?;
+        let payloads = items::build(items::parse_specs(items)?, fds, &caller)?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let token = random_token();
+        self.0.requests.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            id.clone(),
+            Request {
+                token: token.clone(),
+                items: Arc::new(payloads),
+                app_name: app_name(&options),
+                sandboxed: caller.sandboxed,
+                created: Instant::now(),
+                jobs: Vec::new(),
+            },
+        );
+        if let Err(e) = launch::sheet(&id, &token) {
+            self.0.requests.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+            return Err(fdo::Error::Failed(e));
+        }
+        Ok(id)
+    }
+
+    async fn share_to(
+        &self,
+        destination: &str,
+        items: &str,
+        fds: Vec<OwnedFd>,
+        options: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<String> {
+        self.0.touch();
+        let caller = caller::identify(conn, &header).await?;
+        let options = parse_options(options)?;
+        let send = send_options(&options, caller.sandboxed)?;
+        let payloads = items::build(items::parse_specs(items)?, fds, &caller)?;
+        self.0.start(destination, Arc::new(payloads), send, options.notify.unwrap_or(true))
+    }
+
+    fn list_destinations(&self, kinds: Vec<String>, count: u32) -> fdo::Result<String> {
+        self.0.touch();
+        if kinds.is_empty() {
+            return Ok(json(&self.0.destinations()));
+        }
+        let kinds: Vec<ContentKind> = kinds
+            .iter()
+            .map(|k| ContentKind::parse(k).ok_or_else(|| fdo::Error::InvalidArgs(format!("Unknown content kind {k}"))))
+            .collect::<fdo::Result<_>>()?;
+        Ok(json(&self.0.destinations_for(&kinds_of(&kinds), count as usize)))
+    }
+
+    fn list_jobs(&self) -> String {
+        self.0.touch();
+        json(&self.0.jobs())
+    }
+
+    fn get_job(&self, id: &str) -> fdo::Result<String> {
+        self.0.touch();
+        self.0.job(id).map(|j| json(&j)).ok_or_else(|| fdo::Error::UnknownObject(format!("There is no job {id}")))
+    }
+
+    fn cancel_job(&self, id: &str) -> fdo::Result<()> {
+        self.0.touch();
+        if self.0.cancel(id) { Ok(()) } else { Err(fdo::Error::UnknownObject(format!("There is no job {id}"))) }
+    }
+
+    async fn set_destination_preferences(
+        &self,
+        update: &str,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> fdo::Result<()> {
+        self.0.touch();
+        let update: PreferencesUpdate = serde_json::from_str(update)
+            .map_err(|e| fdo::Error::InvalidArgs(format!("The preferences aren't valid JSON: {e}")))?;
+        self.0.update_prefs(update).map_err(|e| fdo::Error::Failed(format!("Couldn't save the destinations: {e}")))?;
+        let _ = Self::destinations_changed(&emitter).await;
+        Ok(())
+    }
+
+    #[zbus(signal)]
+    async fn job_changed(emitter: &SignalEmitter<'_>, id: &str, job: &str) -> zbus::Result<()>;
+
+    #[zbus(signal)]
+    async fn destinations_changed(emitter: &SignalEmitter<'_>) -> zbus::Result<()>;
+}
+
+/// The Share Sheet's side: every call needs the request's token.
+pub struct Sheet1(pub Arc<State>);
+
+impl Sheet1 {
+    fn with<T>(&self, request: &str, token: &str, f: impl FnOnce(&mut Request) -> fdo::Result<T>) -> fdo::Result<T> {
+        self.0.touch();
+        let mut requests = self.0.requests.lock().unwrap_or_else(|e| e.into_inner());
+        match requests.get_mut(request) {
+            Some(r) if same(&r.token, token) => f(r),
+            _ => Err(fdo::Error::AccessDenied("This share request has ended".into())),
+        }
+    }
+}
+
+#[interface(name = "io.github.design_nexus.nyx.ShareSheet1")]
+impl Sheet1 {
+    fn get_request(&self, request: &str, token: &str) -> fdo::Result<String> {
+        let (items, app_name, sandboxed) =
+            self.with(request, token, |r| Ok((r.items.clone(), r.app_name.clone(), r.sandboxed)))?;
+        let kinds = kinds_of(items.iter().map(|p| &p.info.kind));
+        Ok(json(&RequestInfo {
+            app_name,
+            items: items.iter().map(|p| p.info.clone()).collect(),
+            destinations: self.0.destinations_for(&kinds, items.len()),
+            sandboxed,
+        }))
+    }
+
+    fn open_item(&self, request: &str, token: &str, index: u32) -> fdo::Result<OwnedFd> {
+        let items = self.with(request, token, |r| Ok(r.items.clone()))?;
+        let item: &Payload = items.get(index as usize).ok_or_else(|| fdo::Error::InvalidArgs("No such item".into()))?;
+        match (&item.info.kind, &item.data) {
+            (ContentKind::Image, nyx_share_providers::Data::File(file)) => {
+                let dup = file.try_clone().map_err(|e| fdo::Error::Failed(e.to_string()))?;
+                Ok(std::os::fd::OwnedFd::from(dup).into())
+            }
+            _ => Err(fdo::Error::InvalidArgs("Only images have a preview".into())),
+        }
+    }
+
+    fn choose(&self, request: &str, token: &str, destination: &str, options: &str) -> fdo::Result<String> {
+        let options = parse_options(options)?;
+        // The folder comes from the user's own choice in the sheet, so a sandboxed origin doesn't matter here.
+        let send = send_options(&options, false)?;
+        let items = self.with(request, token, |r| Ok(r.items.clone()))?;
+        let id = self.0.start(destination, items, send, false)?;
+        self.with(request, token, |r| {
+            r.jobs.push(id.clone());
+            Ok(())
+        })?;
+        Ok(id)
+    }
+
+    fn dismiss(&self, request: &str, token: &str) -> fdo::Result<()> {
+        let jobs = self.with(request, token, |r| Ok(r.jobs.clone()))?;
+        self.0.requests.lock().unwrap_or_else(|e| e.into_inner()).remove(request);
+        self.0.release(&jobs);
+        Ok(())
+    }
+}

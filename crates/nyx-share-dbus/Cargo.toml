@@ -1,0 +1,13 @@
+[package]
+name = "nyx-share-dbus"
+description = "D-Bus interface definitions for Nyx Share"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+nyx-share-core.workspace = true
+serde.workspace = true
+zbus.workspace = true

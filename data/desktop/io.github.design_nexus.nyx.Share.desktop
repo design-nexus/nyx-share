@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Share
+Comment=Share files, text and links with apps, devices and folders
+Exec=nyx-share-sheet
+Icon=io.github.design_nexus.nyx.Share
+Terminal=false
+NoDisplay=true
+StartupWMClass=io.github.design_nexus.nyx.Share
+Categories=Utility;GTK;
