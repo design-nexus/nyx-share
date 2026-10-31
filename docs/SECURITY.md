@@ -38,14 +38,21 @@ remote device without explicit trust (from Phase 3).
 - Same-user processes can call the service like any app; this is inherent to a
   session service.
 - Nearby sharing (LocalSend) is described in [LOCALSEND.md](LOCALSEND.md). In
-  short: every incoming offer needs your acceptance (no unattended receiving
-  yet); senders pin the receiver's certificate; senders' certificates are
+  short: an incoming offer needs your acceptance unless it comes from a saved
+  computer you marked trusted and the sender proved that computer's key (a
+  name or address is never enough); senders pin the receiver's certificate; senders' certificates are
   checked against what they claim; received names are sanitized and never
   replace a file; offers are refused when the receive folder lacks the space
   (plus a 512 MB reserve) or carry more than 1,000 files; uploads are only taken
   from the address and with the per-file tokens of the accepted session;
   received files are never opened automatically. The receiver listens only
   while the service runs, unless `visibility = "off"` turns it off.
+- NAS folders ([NAS.md](NAS.md)) keep passwords in the Secret Service, never in
+  `nas.toml`, and hand them to `secret-tool` on stdin, not in arguments. Share
+  answers only password prompts; an unknown SSH host key or any other question
+  is refused. Writes go to a partial file and never replace an existing one;
+  sources are only read. A subfolder may not contain `.` or `..`, and each of
+  its parts is reduced to a safe name.
 - External providers are not implemented; they will run out of process with
   enforced permissions (see [PROVIDERS.md](PROVIDERS.md)).
 

@@ -26,9 +26,13 @@ plus any outputs. A destination declares the kinds it takes, an optional
 | `clipboard` | `clipboard` ("Copy") | text, url, image; 1 item | `wl-copy --type <mime>` with the data on stdin. Unavailable without Wayland or wl-clipboard. |
 | `folder` | `save` ("Save to folder") | text, image, file | Checks free space, writes each item to a hidden partial file, fsyncs, then renames without replacing (`renameat2(RENAME_NOREPLACE)`, falling back to a hard link, then to check-and-rename on filesystems with neither). Text is saved as `Shared text.txt`. Partial files are removed on failure or cancellation. |
 
+| `localsend` | `localsend:<key>` (each nearby device) | text, url, image, file | LocalSend v2 upload to a device found on the network or tailnet, pinned to its key; see [LOCALSEND.md](LOCALSEND.md). Saved computers are left to `computers`. |
+| `computers` | `computer:<id>` (each saved computer) | text, url, image, file | Always listed, with LAN, Tailscale or Offline as status. Sending re-checks the routes in order and pins the saved key. |
+| `nas` | `nas:<id>` (each NAS folder) | text, image, file | GVfs copy with partial files and no replacing; `subfolder` option; see [NAS.md](NAS.md). |
+
 ## Planned
 
-LocalSend, My Computers, NAS, Flux, Nyx Mail, Nyx Cloud, Nyx Pulse, Bluetooth,
+Flux, Nyx Mail, Nyx Cloud, Nyx Pulse, Bluetooth,
 QR code, Nyx Notes and Nyx Assistant; see [ROADMAP.md](ROADMAP.md).
 
 ## External providers (design, not implemented)

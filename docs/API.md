@@ -20,8 +20,16 @@ version; anything else gets `Share2`.
 | `SetDestinationPreferences` | `(s update) → ()` | `{"order":[…],"pinned":[…],"hidden":[…]}`; each list present replaces the saved one. |
 | `Scan` | `() → ()` | Ask nearby devices to answer now. |
 | `Hold` | `() → ()` | Keep the service, and Nearby visibility, running while the caller stays on the bus. |
-| `GetNearby` | `() → s` | JSON: `enabled`, `visibility` (`running` or `off`), `alias`, `fingerprint`, `receive_folder`, `problem`. |
-| `SetNearby` | `(s update) → ()` | `{"visibility":…,"alias":…,"receive_folder":…}`; fields present are saved and applied at once. |
+| `GetNearby` | `() → s` | JSON: `enabled`, `visibility` (`running` or `off`), `alias`, `fingerprint`, `receive_folder`, `problem`, `tailscale`, `tailscale_state`. |
+| `SetNearby` | `(s update) → ()` | `{"visibility":…,"alias":…,"receive_folder":…,"tailscale":…}`; fields present are saved and applied at once. |
+| `ListComputers` | `() → s` | JSON array of saved computers (fields as in [LOCALSEND.md](LOCALSEND.md#my-computers)), each with `presence`: `lan`, `tailscale`, `offline` or `unknown`. |
+| `AddComputer` | `(s from) → s` | Save a nearby device (`localsend:<key>`) or the device answering at `host[:port]`, with the key it presents. Returns the computer as JSON. A key that is already saved is refused. Needs nearby sharing on. |
+| `SaveComputer` | `(s computer) → ()` | Change a saved computer (name, routes, `prefer`, `trusted`, `receive_folder`); its key can't change. |
+| `RemoveComputer` | `(s id) → ()` | |
+| `ListNas` | `() → s` | JSON array of NAS folders (fields as in [NAS.md](NAS.md#settings)), each with `has_password`. |
+| `SaveNas` | `(s folder) → s` | Add (empty `id`) or change a NAS folder; returns its id. Store the password in the Secret Service first (`application=nyx-share`, `nas=<id>`). |
+| `RemoveNas` | `(s id) → ()` | Also removes its saved password. |
+| `TestNas` | `(s id) → s` | Connect and check the folder can be written to; a sentence, or `Failed` with the reason. |
 
 Property `Version` (`u`, read-only) is `1`. Signals: `JobChanged(s id, s job)`,
 `DestinationsChanged()` and `NearbyChanged()`.
@@ -58,6 +66,8 @@ by index:
 - `app_name`: shown in the sheet ("from Photos").
 - `folder`: the target for `save` with `ShareTo`. Refused from sandboxed callers,
   who use `Share` so the user picks the folder.
+- `subfolder`: for a NAS folder, a folder under it (`Reports/2026`), made if
+  missing. No `.` or `..`.
 - `notify`: notify when a `ShareTo` job finishes (default `true`).
 
 ## Destinations and jobs
@@ -128,9 +138,11 @@ s options) → s job`, `Dismiss(s, s)`. For offers from nearby devices:
 `GetIncoming(s session, s token) → s`, `AnswerIncoming(s, s, b accept)` and
 `DismissIncoming(s, s)` (declines an unanswered offer). The id and token reach
 the sheet in `NYX_SHARE_REQUEST` or `NYX_SHARE_INCOMING`, and `NYX_SHARE_TOKEN`.
-For checks, `NYX_SHARE_CHECK_CHOOSE` (`save:/path;clipboard`) makes the sheet
-choose destinations as if clicked, and `NYX_SHARE_CHECK_ANSWER` (`accept` or
-`decline`) answers an offer after two seconds. In the Share window,
+For checks, `NYX_SHARE_CHECK_CHOOSE` (`save:/path;clipboard;nas:<id>>Sub/Folder`)
+makes the sheet choose destinations as if clicked, and `NYX_SHARE_CHECK_ANSWER`
+(`accept` or `decline`) answers an offer after two seconds. In the Share window,
 `NYX_SHARE_CHECK_ADD` (`/a:/b`) fills the tray, `NYX_SHARE_CHECK_PAGE`
-(`transfers` or `settings`) opens a page and `NYX_SHARE_CHECK_SEND=1` sends to
-the first device that appears.
+(`transfers`, `settings` or `add-nas`) opens a page or the Add a NAS folder
+dialog, `NYX_SHARE_CHECK_NAS` (`name|address|tailscale|user|password`) fills
+that dialog and adds, and `NYX_SHARE_CHECK_SEND=1` sends to the first device
+that appears.

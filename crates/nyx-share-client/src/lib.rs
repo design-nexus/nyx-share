@@ -13,7 +13,8 @@
 
 pub use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, PreferencesUpdate};
 pub use nyx_share_dbus::{
-    BUS, Capabilities, INTERFACE, NearbyStatus, NearbyUpdate, PATH, ProviderInfo, RequestInfo, ShareOptions,
+    BUS, Capabilities, ComputerInfo, INTERFACE, NasInfo, NearbyStatus, NearbyUpdate, PATH, ProviderInfo, RequestInfo,
+    ShareOptions,
 };
 
 use nyx_share_core::ItemSpec;
@@ -235,6 +236,44 @@ impl Client {
 
     pub fn set_nearby(&self, update: &NearbyUpdate) -> Result<(), Error> {
         Ok(self.proxy.set_nearby(&to_json(update))?)
+    }
+
+    pub fn computers(&self) -> Result<Vec<ComputerInfo>, Error> {
+        json(&self.proxy.list_computers()?)
+    }
+
+    /// Save a computer from a nearby destination id or an address.
+    pub fn add_computer(&self, from: &str) -> Result<ComputerInfo, Error> {
+        json(&self.proxy.add_computer(from)?)
+    }
+
+    pub fn save_computer(&self, computer: &ComputerInfo) -> Result<(), Error> {
+        Ok(self.proxy.save_computer(&to_json(computer))?)
+    }
+
+    pub fn remove_computer(&self, id: &str) -> Result<(), Error> {
+        Ok(self.proxy.remove_computer(id)?)
+    }
+
+    pub fn nas(&self) -> Result<Vec<NasInfo>, Error> {
+        json(&self.proxy.list_nas()?)
+    }
+
+    /// Add (empty id) or change a NAS folder; returns its id.
+    pub fn save_nas(&self, folder: &NasInfo) -> Result<String, Error> {
+        let mut v = serde_json::to_value(folder).unwrap_or_default();
+        if folder.conflict.is_empty() {
+            v["conflict"] = "keep-both".into();
+        }
+        Ok(self.proxy.save_nas(&v.to_string())?)
+    }
+
+    pub fn remove_nas(&self, id: &str) -> Result<(), Error> {
+        Ok(self.proxy.remove_nas(id)?)
+    }
+
+    pub fn test_nas(&self, id: &str) -> Result<String, Error> {
+        Ok(self.proxy.test_nas(id)?)
     }
 
     /// Block until job `id` finishes, calling `progress` on each change.

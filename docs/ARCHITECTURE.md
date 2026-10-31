@@ -9,8 +9,11 @@ flowchart LR
   Daemon --> Providers["Providers"]
   Providers --> Clipboard["Clipboard: wl-copy"]
   Providers --> Folder["Save to folder"]
+  Providers --> LocalSend["Nearby devices and My computers: LocalSend over LAN and Tailscale"]
+  Providers --> Nas["NAS folders: GVfs (SMB, SFTP, NFS)"]
+  Nas --> Secrets["Secret Service: NAS passwords"]
   Daemon --> Notify["org.freedesktop.Notifications"]
-  Daemon --> Prefs["destinations.toml"]
+  Daemon --> Prefs["destinations.toml, nearby.toml, computers.toml, nas.toml"]
 ```
 
 ## Pieces
@@ -21,7 +24,8 @@ flowchart LR
 | `nyx-share-dbus` | Bus name, object path, zbus proxies for `Share1` and `ShareSheet1`, and the JSON wire types. |
 | `nyx-share-client` | The public blocking client: opens files read-only and sends descriptors, waits on jobs, streams events. zbus with its default async-io runtime; no GTK, no tokio. |
 | `nyx-share-providers` | The `Provider` trait and the built-in destinations. |
-| `nyx-share-localsend` | LocalSend v2: identity, TLS, discovery, sender, receiver, and the Nearby provider. |
+| `nyx-share-localsend` | LocalSend v2: identity, TLS, discovery, Tailscale peers, sender, receiver, and the Nearby and My computers providers. |
+| `nyx-share-nas` | NAS folders: GVfs mounting with saved credentials, copying with partial files, and the Secret Service store for their passwords. |
 | `apps/daemon` | `nyx-share-daemon`: owns requests, jobs, providers and the destination arrangement. |
 | `apps/share-sheet` | `nyx-share-sheet`: the Share app window (launcher), the Share Sheet and the incoming-offer prompt, in one GTK application. Stateless; everything comes from the service. |
 | `apps/cli` | `nyx-share`. |
@@ -53,6 +57,9 @@ flowchart LR
   threads, the same runtime the client needs to stay linkable into nyx-files.
 - **The daemon doesn't link nyx-core**, whose default `gtk` feature would be
   unified into the daemon in a workspace build.
+- **NAS folders go through GVfs**, not nyx-transferd: no changes to another
+  service's API, SMB without an rclone remote, and the same connections as Nyx
+  Files. GIO calls run on the job's worker thread with their own main context.
 - **The sheet doesn't float by rule.** It is a fixed-size window, which Hyprland
   floats and centres on its own.
 

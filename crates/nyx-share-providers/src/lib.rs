@@ -38,6 +38,8 @@ impl Payload {
 #[derive(Clone, Debug, Default)]
 pub struct SendOptions {
     pub folder: Option<PathBuf>,
+    /// A folder under the destination's own (a NAS folder's), for this send only.
+    pub subfolder: Option<String>,
 }
 
 /// A job as a provider sees it.

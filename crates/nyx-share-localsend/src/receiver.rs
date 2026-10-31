@@ -57,7 +57,7 @@ pub trait Host: Send + Sync {
     fn offer(&self, offer: &Offer) -> Decision;
     /// An offer refused without asking, and why.
     fn refused(&self, offer: &Offer, reason: &str);
-    fn receive_folder(&self) -> PathBuf;
+    fn receive_folder(&self, offer: &Offer) -> PathBuf;
     fn started(&self, offer: &Offer);
     fn progress(&self, session: &str, bytes: u64);
     fn saved(&self, session: &str, path: PathBuf);
@@ -277,7 +277,7 @@ impl Receiver {
             total,
             message_only,
         };
-        let folder = self.host.receive_folder();
+        let folder = self.host.receive_folder(&offer);
         if !message_only {
             let free = free_bytes(&folder).unwrap_or(0);
             if free < total.saturating_add(RESERVE) {

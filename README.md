@@ -15,6 +15,8 @@ cloud service, account or relay.
 | Copy (clipboard) | One text, link or image | Through `wl-copy`; the content stays on the clipboard after the service exits. |
 | Save to folder | Any number of files, images and texts | Copies into a folder you pick. Never moves or overwrites: a taken name becomes `name (2).ext`. |
 | Nearby devices | Files, images, text and links | Phones, tablets and computers running LocalSend on your network, over encrypted connections pinned to each device's key. |
+| My computers | Files, images, text and links | Computers you saved, reached over the LAN or Tailscale (LAN first), known by their device key rather than their address. Ones you trust can send to you without asking. |
+| NAS folders | Files, images and text | A folder on an SMB, SFTP or NFS share, through GVfs like Nyx Files. Copies only; passwords stay in your keyring. See [NAS.md](docs/NAS.md). |
 
 While the service runs (when you share, and for a minute after), this computer
 is visible to nearby LocalSend devices and can receive from them. Every
@@ -22,9 +24,8 @@ incoming offer asks you first, in the Share Sheet; accepted files go to your
 Downloads folder. See [LOCALSEND.md](docs/LOCALSEND.md).
 
 Transfers run in the service, so closing the Share Sheet doesn't stop them, and
-the service notifies you when one finishes after the sheet has closed. Your
-computers over LAN or Tailscale, NAS folders, phones through Flux, Nyx app
-destinations and the Settings page are planned; see
+the service notifies you when one finishes after the sheet has closed. Phones
+through Flux, Nyx app destinations and the Settings page are planned; see
 [the roadmap](docs/ROADMAP.md). Nothing in the sheet appears for a destination
 that doesn't exist yet.
 
@@ -40,8 +41,9 @@ received, kept across restarts. The switch at the bottom says whether this
 computer is visible to nearby devices; while the window is open it stays
 visible and can receive. Offers that arrive while it's open ask in a dialog
 over the window. Settings (the sliders button) has the name others see, the
-receive folder and this device's key. Ctrl+, opens them, F5 looks for devices
-again, Esc closes.
+receive folder, this device's key, **My computers** (trust, remove, add by
+address; the pin beside a nearby device saves it too) and **NAS folders** (add,
+test, remove). Ctrl+, opens them, F5 looks for devices again, Esc closes.
 
 ![The Share window with files chosen](docs/screenshots/app-nearby-dark.png)
 ![An offer from a nearby phone](docs/screenshots/app-incoming-dark.png)
@@ -58,7 +60,8 @@ From a checkout: `./install.sh`. It installs `nyx-share`, `nyx-share-daemon` and
 `nyx-share-sheet` to `~/.local/bin`, the D-Bus activation file, a systemd user
 unit, the icon, the launcher entry for the Share app and the Nyx Files provider.
 Nothing starts until you share or open Share.
-`./uninstall.sh` removes them (`--purge` also removes your destination arrangement).
+`./uninstall.sh` removes them (`--purge` also removes Share's settings, saved
+computers and NAS folders, and the NAS passwords in your keyring).
 
 Requires Rust 1.99, GTK 4.18, a session bus and, for the clipboard, `wl-clipboard`.
 
@@ -72,6 +75,12 @@ nyx-share --to save --folder ~/Backups ~/Documents/report.pdf
 nyx-share destinations                          # what is available
 nyx-share jobs                                  # transfers since the service started
 nyx-share cancel JOB
+nyx-share computers add 100.101.102.103         # save a computer (address or nearby device)
+nyx-share computers trust "G16 Laptop"          # receive from it without asking
+nyx-share --device "G16 Laptop" ~/report.pdf
+echo "$PASSWORD" | nyx-share nas add "NAS Documents" smb://nas.local/Documents/Inbox --user ken --password-stdin
+nyx-share nas test "NAS Documents"
+nyx-share --nas "NAS Documents" --subfolder Reports/2026 ~/report.pdf
 ```
 
 `--to` waits and prints the result (exit status 1 if it fails); add `--no-wait`
@@ -113,6 +122,8 @@ or over D-Bus. The sheet remembers the last Save to folder location in
 `~/.config/nyx-share/settings.toml`. Nearby sharing reads
 `~/.config/nyx-share/nearby.toml` (visibility, the name others see, the receive
 folder), which the Share app's settings change; see [LOCALSEND.md](docs/LOCALSEND.md).
+Saved computers are in `~/.config/nyx-share/computers.toml` and NAS folders in
+`~/.config/nyx-share/nas.toml` (no passwords; see [NAS.md](docs/NAS.md)).
 Finished transfers are listed from `~/.local/state/nyx-share/history.json`.
 
 ## Build and test

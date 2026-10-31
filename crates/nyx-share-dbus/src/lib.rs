@@ -64,6 +64,28 @@ pub trait Share {
     /// JSON [`NearbyUpdate`]; the fields present are saved and applied.
     fn set_nearby(&self, update: &str) -> zbus::Result<()>;
 
+    /// JSON array of [`ComputerInfo`].
+    fn list_computers(&self) -> zbus::Result<String>;
+
+    /// Save a computer from a nearby device (`localsend:<key>`) or an address.
+    fn add_computer(&self, from: &str) -> zbus::Result<String>;
+
+    /// JSON [`ComputerInfo`] (without `presence`); its key can't change.
+    fn save_computer(&self, computer: &str) -> zbus::Result<()>;
+
+    fn remove_computer(&self, id: &str) -> zbus::Result<()>;
+
+    /// JSON array of [`NasInfo`].
+    fn list_nas(&self) -> zbus::Result<String>;
+
+    /// Add (empty id) or change a NAS folder; returns its id.
+    fn save_nas(&self, folder: &str) -> zbus::Result<String>;
+
+    fn remove_nas(&self, id: &str) -> zbus::Result<()>;
+
+    /// Connect and check it can be written to; returns a sentence.
+    fn test_nas(&self, id: &str) -> zbus::Result<String>;
+
     #[zbus(signal)]
     fn nearby_changed(&self) -> zbus::Result<()>;
 
@@ -100,6 +122,50 @@ pub trait ShareSheet {
 
     /// The sheet closed: an unanswered offer is declined; a transfer continues.
     fn dismiss_incoming(&self, session: &str, token: &str) -> zbus::Result<()>;
+}
+
+/// A NAS folder destination.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NasInfo {
+    pub id: String,
+    pub name: String,
+    /// `smb://`, `sftp://`, `nfs://` or `file://` address of the folder.
+    pub uri: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tailscale_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    /// `keep-both` or `skip`.
+    pub conflict: String,
+    /// A password is saved in the Secret Service. Read only.
+    #[serde(skip_serializing)]
+    pub has_password: bool,
+}
+
+/// A saved computer: its key, addresses and trust.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ComputerInfo {
+    pub id: String,
+    pub name: String,
+    pub fingerprint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lan: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tailscale: Option<String>,
+    pub port: u16,
+    /// `auto`, `lan` or `tailscale`.
+    pub prefer: String,
+    /// Files from it are received without asking.
+    pub trusted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub receive_folder: Option<String>,
+    /// `lan`, `tailscale`, `offline` or `unknown`. Read only.
+    #[serde(skip_serializing)]
+    pub presence: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -194,6 +260,9 @@ pub struct ShareOptions {
     /// The folder for Save to folder. Refused from sandboxed callers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// A folder under a NAS destination's own, for this send (`2026/Trips`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subfolder: Option<String>,
     /// Notify when the job finishes (default true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notify: Option<bool>,

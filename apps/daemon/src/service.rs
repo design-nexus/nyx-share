@@ -1,5 +1,5 @@
 use crate::state::{Answer, Request, State, lock};
-use crate::{caller, items, launch, nearby};
+use crate::{caller, items, launch, nas, nearby};
 use nyx_share_core::{API_VERSION, ContentKind, Limits, PreferencesUpdate, kinds_of};
 use nyx_share_dbus::{
     Capabilities, IncomingFile, IncomingInfo, NearbyStatus, NearbyUpdate, ProviderInfo, RequestInfo, ShareOptions,
@@ -45,7 +45,20 @@ fn send_options(options: &ShareOptions, sandboxed: bool) -> fdo::Result<SendOpti
             Some(p)
         }
     };
-    Ok(SendOptions { folder })
+    let subfolder = options.subfolder.clone().filter(|s| !s.trim().is_empty());
+    if let Some(sub) = &subfolder {
+        nyx_share_nas::clean_subfolder(sub).map_err(fdo::Error::InvalidArgs)?;
+    }
+    Ok(SendOptions { folder, subfolder })
+}
+
+/// Run blocking work (network checks) off the D-Bus executor.
+async fn blocking_task<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = tx.send_blocking(work());
+    });
+    rx.recv().await.expect("the worker sends a result")
 }
 
 fn random_token() -> String {
@@ -223,6 +236,132 @@ impl Share1 {
             std::io::ErrorKind::InvalidInput => fdo::Error::InvalidArgs(e.to_string()),
             _ => fdo::Error::Failed(format!("Couldn't save the Nearby settings: {e}")),
         })
+    }
+
+    /// JSON array of saved computers, each with `presence`: `lan`, `tailscale`, `offline` or `unknown`.
+    fn list_computers(&self) -> String {
+        self.0.touch();
+        let running = self.0.nearby();
+        let list = running.as_ref().map(|n| n.computers()).unwrap_or_else(nearby::load_computers);
+        let out: Vec<serde_json::Value> = list
+            .into_iter()
+            .map(|c| {
+                let presence = running.as_ref().map(|n| n.presence(&c.id));
+                let mut v = serde_json::to_value(&c).unwrap_or_default();
+                v["presence"] = serde_json::to_value(presence.unwrap_or(nyx_share_localsend::computers::Presence::Unknown))
+                    .unwrap_or_default();
+                v
+            })
+            .collect();
+        json(&out)
+    }
+
+    /// Save a computer from a nearby device (`localsend:<key>`) or an address
+    /// (IP or name, optionally `:port`). Returns it as JSON.
+    async fn add_computer(&self, from: &str) -> fdo::Result<String> {
+        self.0.touch();
+        let n = self.0.nearby().ok_or_else(|| fdo::Error::Failed("Turn on nearby sharing first".into()))?;
+        let from = from.to_string();
+        let c = blocking_task(move || n.new_computer(&from)).await.map_err(fdo::Error::Failed)?;
+        let mut list = nearby::load_computers();
+        if let Some(existing) = list.iter().find(|x| x.fingerprint.eq_ignore_ascii_case(&c.fingerprint)) {
+            return Err(fdo::Error::Failed(format!("{} is already saved as {}", c.name, existing.name)));
+        }
+        list.push(c.clone());
+        nearby::save_computers(&self.0, list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))?;
+        Ok(json(&c))
+    }
+
+    /// Change a saved computer (its key can't change).
+    fn save_computer(&self, computer: &str) -> fdo::Result<()> {
+        self.0.touch();
+        let c: nyx_share_localsend::computers::Computer =
+            serde_json::from_str(computer).map_err(|e| fdo::Error::InvalidArgs(format!("Not a computer: {e}")))?;
+        let mut list = nearby::load_computers();
+        let slot = list.iter_mut().find(|x| x.id == c.id).ok_or_else(|| fdo::Error::UnknownObject("No such computer".into()))?;
+        if !slot.fingerprint.eq_ignore_ascii_case(&c.fingerprint) {
+            return Err(fdo::Error::InvalidArgs("A computer's key can't change; remove it and add it again".into()));
+        }
+        if c.name.trim().is_empty() || c.receive_folder.as_ref().is_some_and(|f| !f.is_absolute()) {
+            return Err(fdo::Error::InvalidArgs("A name is needed, and the folder must be an absolute path".into()));
+        }
+        *slot = c;
+        nearby::save_computers(&self.0, list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))
+    }
+
+    fn remove_computer(&self, id: &str) -> fdo::Result<()> {
+        self.0.touch();
+        let mut list = nearby::load_computers();
+        let before = list.len();
+        list.retain(|c| c.id != id);
+        if list.len() == before {
+            return Err(fdo::Error::UnknownObject("No such computer".into()));
+        }
+        nearby::save_computers(&self.0, list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))
+    }
+
+    /// JSON array of NAS folders. Each has `has_password` (read only).
+    fn list_nas(&self) -> String {
+        self.0.touch();
+        let list = self.0.nas.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let out: Vec<serde_json::Value> = list
+            .into_iter()
+            .map(|n| {
+                let mut v = serde_json::to_value(&n).unwrap_or_default();
+                v["has_password"] = nyx_share_nas::secrets::password(&n.id).is_some().into();
+                v
+            })
+            .collect();
+        json(&out)
+    }
+
+    /// Add (empty `id`) or change a NAS folder. Returns its id. Store its
+    /// password in the Secret Service first (attributes application=nyx-share, nas=<id>).
+    async fn save_nas(&self, folder: &str, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> fdo::Result<String> {
+        self.0.touch();
+        let mut n: nyx_share_nas::Nas =
+            serde_json::from_str(folder).map_err(|e| fdo::Error::InvalidArgs(format!("Not a NAS folder: {e}")))?;
+        n.validate().map_err(fdo::Error::InvalidArgs)?;
+        if n.id.is_empty() {
+            n.id = uuid::Uuid::new_v4().to_string();
+        }
+        let mut list = self.0.nas.read().unwrap_or_else(|e| e.into_inner()).clone();
+        match list.iter_mut().find(|x| x.id == n.id) {
+            Some(slot) => *slot = n.clone(),
+            None => list.push(n.clone()),
+        }
+        nas::save(&self.0.nas, list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))?;
+        let _ = Self::destinations_changed(&emitter).await;
+        Ok(n.id)
+    }
+
+    async fn remove_nas(&self, id: &str, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> fdo::Result<()> {
+        self.0.touch();
+        let mut list = self.0.nas.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let before = list.len();
+        list.retain(|n| n.id != id);
+        if list.len() == before {
+            return Err(fdo::Error::UnknownObject("No such NAS folder".into()));
+        }
+        nas::save(&self.0.nas, list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))?;
+        nyx_share_nas::secrets::clear(id);
+        let _ = Self::destinations_changed(&emitter).await;
+        Ok(())
+    }
+
+    /// Connect and check the folder can be written to. Returns a sentence.
+    async fn test_nas(&self, id: &str) -> fdo::Result<String> {
+        self.0.touch();
+        let n = self
+            .0
+            .nas
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|n| n.id == id)
+            .cloned()
+            .ok_or_else(|| fdo::Error::UnknownObject("No such NAS folder".into()))?;
+        blocking_task(move || nyx_share_nas::test(&n)).await.map_err(fdo::Error::Failed)
     }
 
     #[zbus(signal)]

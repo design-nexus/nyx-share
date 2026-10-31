@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Usage: uninstall.sh [--purge]   --purge also removes the destination arrangement.
+# Usage: uninstall.sh [--purge]   --purge also removes Share's settings (arrangement,
+# nearby, computers, NAS folders) and the NAS passwords in the keyring.
 set -euo pipefail
 share="${XDG_DATA_HOME:-$HOME/.local/share}"
 config="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -12,5 +13,8 @@ rm -f "$share/icons/hicolor/scalable/apps/io.github.design_nexus.nyx.Share.svg"
 rm -rf "$config/nyx-files/providers/nyx-share"
 if command -v update-desktop-database >/dev/null; then update-desktop-database "$share/applications"; fi
 if command -v systemctl >/dev/null; then systemctl --user daemon-reload 2>/dev/null || true; fi
-if [[ ${1:-} == --purge ]]; then rm -rf "$config/nyx-share"; fi
+if [[ ${1:-} == --purge ]]; then
+  rm -rf "$config/nyx-share"
+  if command -v secret-tool >/dev/null; then secret-tool clear application nyx-share 2>/dev/null || true; fi
+fi
 printf 'Uninstalled Share.\n'

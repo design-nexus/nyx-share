@@ -10,8 +10,8 @@
 | — | Nyx Files: Share… and Send to → Share | Done through the Files provider protocol (`nyx-share files-provider`); protocol checked end to end, the menu itself to be looked at in Files. A flat Send to → G16 Laptop needs a Files change |
 | — | The Share app: nearby devices, transfers, settings | Done: compact window in place of the LocalSend app; checked against a second device over the network |
 | 3 | LocalSend nearby sharing, receiving with confirmation | Done ([LOCALSEND.md](LOCALSEND.md)); checked with the official apps in both directions (Linux desktop, Android over Tailscale) |
-| 4 | My Computers over LAN and Tailscale | Started: LocalSend devices on the tailnet are found and reached directly (LAN first). Next: pinned computers with saved addresses, trust, and unattended receiving |
-| 5 | NAS destinations | Planned: [NAS.md](NAS.md); needs nyx-transfer additions |
+| 4 | My Computers over LAN and Tailscale | Done: saved computers (from a nearby device or by address) identified by their LocalSend key, LAN and Tailscale routes with LAN first, online status, trusted computers received from without asking, a receive folder per computer; in the Share app, the sheet's Devices section and `nyx-share --device`. Checked between two services on private buses. Not yet looked at: the settings group with computers in it, and Send to in Nyx Files |
+| 5 | NAS destinations | Done through GVfs (SMB, SFTP, NFS, local): [NAS.md](NAS.md). Checked against Samba and OpenSSH servers; NFS untried |
 | 6 | Flux phones | Planned: [FLUX.md](FLUX.md) |
 | 7 | Mail, Cloud, Pulse, Bluetooth, QR code, Notes, Assistant; external providers | Planned: [PROVIDERS.md](PROVIDERS.md) |
 | 8 | Settings → Sharing | Planned; talks only to `Share1` |

@@ -3,6 +3,7 @@
 
 use crate::launch;
 use crate::state::{Answer, Incoming, State, lock};
+use nyx_share_localsend::computers::{Computer, ComputersProvider};
 use nyx_share_localsend::{Decision, End, Events, Nearby, NearbyProvider, Offer};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -40,10 +41,45 @@ impl Default for Settings {
     }
 }
 
-/// Look for devices: multicast on the local network, and the tailnet.
+/// Look for devices: multicast on the local network, the tailnet, and the
+/// saved computers at their addresses.
 pub fn look(nearby: &Arc<Nearby>) {
     nearby.scan();
     nearby.probe_tailnet();
+    nearby.probe_computers();
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct ComputersFile {
+    #[serde(default, rename = "computer")]
+    computers: Vec<Computer>,
+}
+
+fn computers_path() -> PathBuf {
+    xdg("XDG_CONFIG_HOME", ".config").join("nyx-share/computers.toml")
+}
+
+pub fn load_computers() -> Vec<Computer> {
+    std::fs::read_to_string(computers_path())
+        .ok()
+        .and_then(|s| toml::from_str::<ComputersFile>(&s).ok())
+        .map(|f| f.computers)
+        .unwrap_or_default()
+}
+
+pub fn save_computers(state: &State, computers: Vec<Computer>) -> std::io::Result<()> {
+    let path = computers_path();
+    std::fs::create_dir_all(path.parent().expect("has a parent"))?;
+    let text = toml::to_string(&ComputersFile { computers: computers.clone() }).map_err(std::io::Error::other)?;
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(tmp, &path)?;
+    if let Some(n) = state.nearby() {
+        n.set_computers(computers);
+        n.probe_computers();
+    }
+    state.destinations_changed();
+    Ok(())
 }
 
 fn home() -> PathBuf {
@@ -124,8 +160,11 @@ pub fn start(state: Arc<State>) {
     match Nearby::start(&identity_dir(), alias(&settings), settings.tailscale, bridge) {
         Ok(nearby) => {
             *PROBLEM.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            nearby.set_computers(load_computers());
             state.set_nearby(Some(nearby.clone()));
-            state.add_provider(Arc::new(NearbyProvider(nearby)));
+            state.add_provider(Arc::new(ComputersProvider(nearby.clone())));
+            state.add_provider(Arc::new(NearbyProvider(nearby.clone())));
+            nearby.probe_computers();
         }
         Err(e) => {
             eprintln!("nyx-share: nearby sharing is off: {e}");
@@ -141,6 +180,7 @@ pub fn stop(state: &State) {
         n.stop();
     }
     state.remove_provider("localsend");
+    state.remove_provider("computers");
     state.set_nearby(None);
     state.destinations_changed();
     state.nearby_changed();
@@ -204,6 +244,20 @@ impl Events for Bridge {
         let Some(state) = self.0.upgrade() else { return Decision::Decline };
         state.touch();
         let token = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+        // A trusted computer that proved its key is received from without asking.
+        let trusted = offer.verified
+            && state.nearby().and_then(|n| n.computer_with_key(&offer.sender.fingerprint)).is_some_and(|c| c.trusted);
+        if trusted && !offer.message_only {
+            let incoming = Incoming {
+                token,
+                offer: offer.clone(),
+                answer: Answer::Accepted,
+                dismissed: true,
+                folder: self.receive_folder(offer).display().to_string(),
+            };
+            lock(&state.incoming).insert(offer.session.clone(), incoming);
+            return Decision::Accept;
+        }
         let incoming = Incoming {
             token: token.clone(),
             offer: offer.clone(),
@@ -246,8 +300,15 @@ impl Events for Bridge {
         }
     }
 
-    fn receive_folder(&self) -> PathBuf {
-        let folder = receive_folder();
+    fn receive_folder(&self, offer: &Offer) -> PathBuf {
+        let own = self
+            .0
+            .upgrade()
+            .and_then(|s| s.nearby())
+            .and_then(|n| n.computer_with_key(&offer.sender.fingerprint))
+            .and_then(|c| c.receive_folder)
+            .filter(|p| p.is_absolute());
+        let folder = own.unwrap_or_else(receive_folder);
         let _ = std::fs::create_dir_all(&folder);
         folder
     }

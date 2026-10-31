@@ -240,7 +240,7 @@ mod tests {
     }
 
     fn run(items: &[Payload], folder: &Path, cancel: bool) -> Result<Outcome, SendError> {
-        let options = SendOptions { folder: Some(folder.to_path_buf()) };
+        let options = SendOptions { folder: Some(folder.to_path_buf()), ..Default::default() };
         let cancel = AtomicBool::new(cancel);
         let task = Task { items, options: &options, cancel: &cancel, progress: &|_| {} };
         Folder.send("save", &task)

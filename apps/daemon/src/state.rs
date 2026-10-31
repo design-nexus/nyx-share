@@ -57,6 +57,7 @@ pub struct State {
     jobs: Mutex<Vec<Entry>>,
     bus: OnceLock<zbus::Connection>,
     nearby: Mutex<Option<Arc<Nearby>>>,
+    pub nas: Arc<RwLock<Vec<nyx_share_nas::Nas>>>,
     /// Bus names keeping the service running (open Share windows).
     pub holders: Mutex<std::collections::HashSet<String>>,
     last_activity: Mutex<Instant>,
@@ -93,7 +94,7 @@ fn now() -> i64 {
 }
 
 impl State {
-    pub fn new(providers: Vec<Arc<dyn Provider>>, prefs: Preferences) -> Self {
+    pub fn new(providers: Vec<Arc<dyn Provider>>, prefs: Preferences, nas: Arc<RwLock<Vec<nyx_share_nas::Nas>>>) -> Self {
         Self {
             providers: RwLock::new(providers),
             prefs: Mutex::new(prefs),
@@ -109,6 +110,7 @@ impl State {
             ),
             bus: OnceLock::new(),
             nearby: Mutex::new(None),
+            nas,
             holders: Mutex::new(std::collections::HashSet::new()),
             last_activity: Mutex::new(Instant::now()),
         }

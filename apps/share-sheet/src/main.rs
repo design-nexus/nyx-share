@@ -22,6 +22,8 @@ fn main() -> glib::ExitCode {
         unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
     }
     let id = std::env::var("NYX_SHARE_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
+    // Windows without an application, like dialogs, take their Wayland app ID from this.
+    glib::set_prgname(Some(id.as_str()));
     let app = gtk::Application::builder()
         .application_id(id)
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT)

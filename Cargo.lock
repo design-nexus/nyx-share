@@ -905,9 +905,12 @@ dependencies = [
 name = "nyx-share"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "nyx-share-client",
  "nyx-share-core",
+ "nyx-share-nas",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -935,11 +938,13 @@ name = "nyx-share-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "async-io",
  "libc",
  "nyx-share-core",
  "nyx-share-dbus",
  "nyx-share-localsend",
+ "nyx-share-nas",
  "nyx-share-providers",
  "serde",
  "serde_json",
@@ -976,6 +981,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nyx-share-nas"
+version = "0.1.0"
+dependencies = [
+ "gio",
+ "glib",
+ "nyx-share-core",
+ "nyx-share-providers",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "nyx-share-providers"
 version = "0.1.0"
 dependencies = [
@@ -993,10 +1010,12 @@ dependencies = [
  "nyx-share-client",
  "nyx-share-core",
  "nyx-share-dbus",
+ "nyx-share-nas",
  "nyx-theme",
  "nyx-ui",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

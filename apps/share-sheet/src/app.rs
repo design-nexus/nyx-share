@@ -6,7 +6,8 @@ use crate::sheet;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 use nyx_share_client::{
-    Client, Content, ContentKind, Destination, Direction, Event, Job, JobState, NearbyStatus, NearbyUpdate, ShareOptions,
+    Client, ComputerInfo, Content, ContentKind, Destination, Direction, Event, Job, JobState, NasInfo, NearbyStatus,
+    NearbyUpdate, ShareOptions,
 };
 use nyx_share_core::{Section, units};
 use nyx_ui::widgets;
@@ -72,6 +73,8 @@ struct App {
     /// The latest job started from this window, per destination.
     sent: RefCell<HashMap<String, (String, Instant)>>,
     nearby: RefCell<NearbyStatus>,
+    computers: RefCell<Vec<ComputerInfo>>,
+    nas: RefCell<Vec<NasInfo>>,
     page: RefCell<String>,
     updating: Cell<bool>,
     check_send: Cell<bool>,
@@ -183,7 +186,14 @@ fn build(app: &gtk::Application, client: Arc<Client>) {
     let transfers = widgets::vbox(0);
     stack.add_named(&transfers, Some("transfers"));
     let settings = widgets::vbox(0);
-    stack.add_named(&settings, Some("settings"));
+    // Settings grow with every computer and NAS folder; keep the window compact.
+    let settings_scroll = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(620)
+        .child(&settings)
+        .build();
+    stack.add_named(&settings_scroll, Some("settings"));
     body.append(&stack);
 
     let footer = widgets::hbox(10);
@@ -226,6 +236,8 @@ fn build(app: &gtk::Application, client: Arc<Client>) {
         jobs: RefCell::default(),
         sent: RefCell::default(),
         nearby: RefCell::default(),
+        computers: RefCell::default(),
+        nas: RefCell::default(),
         page: RefCell::new("nearby".into()),
         updating: Cell::new(false),
         check_send: Cell::new(std::env::var_os("NYX_SHARE_CHECK_SEND").is_some()),
@@ -263,7 +275,11 @@ fn listen(app: &Rc<App>) {
             let Some(app) = weak.upgrade() else { break };
             match e {
                 Event::JobChanged(job) => app.job_changed(job),
-                Event::DestinationsChanged => app.load_destinations(),
+                Event::DestinationsChanged => {
+                    app.load_destinations();
+                    app.load_computers();
+                    app.load_nas();
+                }
                 Event::NearbyChanged => app.load_nearby(),
             }
         }
@@ -272,14 +288,24 @@ fn listen(app: &Rc<App>) {
 
 impl App {
     /// For checks and screenshots: `NYX_SHARE_CHECK_ADD=/a:/b` puts files in the
-    /// tray, `NYX_SHARE_CHECK_PAGE=transfers|settings` opens a page, and
+    /// tray, `NYX_SHARE_CHECK_PAGE=transfers|settings|add-nas` opens a page, and
     /// `NYX_SHARE_CHECK_SEND=1` sends to the first device once one appears.
     fn check_hooks(self: &Rc<Self>) {
         if let Ok(paths) = std::env::var("NYX_SHARE_CHECK_ADD") {
             self.add_files(paths.split(':').filter(|p| !p.is_empty()).map(PathBuf::from).collect());
         }
-        if let Ok(page) = std::env::var("NYX_SHARE_CHECK_PAGE") {
-            self.show(&page);
+        match std::env::var("NYX_SHARE_CHECK_PAGE").as_deref() {
+            Ok("add-nas") => {
+                self.show("settings");
+                let weak = Rc::downgrade(self);
+                glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || {
+                    if let Some(app) = weak.upgrade() {
+                        app.add_nas();
+                    }
+                });
+            }
+            Ok(page) => self.show(page),
+            Err(_) => {}
         }
     }
 
@@ -398,6 +424,60 @@ impl App {
         self.load_destinations();
         self.load_nearby();
         self.load_jobs();
+        self.load_computers();
+        self.load_nas();
+    }
+
+    fn load_nas(self: &Rc<Self>) {
+        let client = self.client.clone();
+        let weak = Rc::downgrade(self);
+        nyx_core::cmd::background(
+            move || client.nas(),
+            move |result| {
+                let Some(app) = weak.upgrade() else { return };
+                if let Ok(list) = result {
+                    *app.nas.borrow_mut() = list;
+                    if app.page.borrow().as_str() == "settings" {
+                        app.render_settings();
+                    }
+                }
+            },
+        );
+    }
+
+    fn load_computers(self: &Rc<Self>) {
+        let client = self.client.clone();
+        let weak = Rc::downgrade(self);
+        nyx_core::cmd::background(
+            move || client.computers(),
+            move |result| {
+                let Some(app) = weak.upgrade() else { return };
+                if let Ok(list) = result {
+                    *app.computers.borrow_mut() = list;
+                    if app.page.borrow().as_str() == "settings" {
+                        app.render_settings();
+                    }
+                }
+            },
+        );
+    }
+
+    /// Run a client call off the main thread; show its error, then refresh.
+    fn act(self: &Rc<Self>, work: impl FnOnce(&Client) -> Result<(), String> + Send + 'static) {
+        let client = self.client.clone();
+        let weak = Rc::downgrade(self);
+        nyx_core::cmd::background(
+            move || work(&client),
+            move |result| {
+                let Some(app) = weak.upgrade() else { return };
+                if let Err(e) = result {
+                    app.toast(&e);
+                }
+                app.load_computers();
+                app.load_nas();
+                app.load_destinations();
+            },
+        );
     }
 
     fn scan(self: &Rc<Self>) {
@@ -670,7 +750,28 @@ impl App {
             self.devices.append(&e);
             return;
         }
-        let dests = self.dests.borrow().clone();
+        let all = self.dests.borrow().clone();
+        let mine: Vec<Destination> = all.iter().filter(|d| d.section == Section::Devices).cloned().collect();
+        let dests: Vec<Destination> = all.iter().filter(|d| d.section == Section::Nearby).cloned().collect();
+        let items = self.items.borrow().clone();
+        let kinds = nyx_share_core::kinds_of(&items.iter().map(Chosen::kind).collect::<Vec<_>>());
+        if !mine.is_empty() {
+            // My computers come first, above the devices found nearby.
+            self.devices.remove(&head);
+            self.devices.append(&sheet::section_title("My computers"));
+            let list = widgets::vbox(0);
+            list.add_css_class("card");
+            list.add_css_class("app-devices");
+            for (i, d) in mine.iter().enumerate() {
+                let row = self.device_row(d, &items, &kinds);
+                if i > 0 {
+                    row.add_css_class("following");
+                }
+                list.append(&row);
+            }
+            self.devices.append(&list);
+            self.devices.append(&head);
+        }
         if dests.is_empty() {
             let weak = Rc::downgrade(self);
             let action: widgets::Action<'_> = Some((
@@ -692,8 +793,6 @@ impl App {
             self.devices.append(&e);
             return;
         }
-        let items = self.items.borrow().clone();
-        let kinds = nyx_share_core::kinds_of(&items.iter().map(Chosen::kind).collect::<Vec<_>>());
         let list = widgets::vbox(0);
         list.add_css_class("card");
         list.add_css_class("app-devices");
@@ -772,6 +871,19 @@ impl App {
                 let status = d.status.clone().unwrap_or_default();
                 sub.set_text(&[status, key].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "));
             }
+        }
+        if d.provider == "localsend" {
+            let save = widgets::icon_button("view-pin-symbolic", "Save as my computer");
+            save.set_valign(gtk::Align::Center);
+            let weak = Rc::downgrade(self);
+            let id = d.id.clone();
+            save.connect_clicked(move |b| {
+                b.set_sensitive(false);
+                let Some(app) = weak.upgrade() else { return };
+                let id = id.clone();
+                app.act(move |c| c.add_computer(&id).map(|_| ()).map_err(|e| e.to_string()));
+            });
+            row.append(&save);
         }
         let can = !items.is_empty() && d.available && d.accepts(kinds, items.len());
         let again = self.job_for(&d.id).is_some_and(|(j, _)| j.state.finished());
@@ -1107,12 +1219,252 @@ impl App {
         card.append(&widgets::row("Ask before receiving", "Trusted devices come with My computers.", Some(ask.upcast_ref())));
         self.settings.append(&card);
 
+        self.settings.append(&group("My computers"));
+        let card = widgets::vbox(0);
+        card.add_css_class("card");
+        for c in self.computers.borrow().iter() {
+            let routes: Vec<String> =
+                [c.lan.clone().map(|a| format!("LAN {a}")), c.tailscale.clone().map(|a| format!("Tailscale {a}"))]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+            let presence = match c.presence.as_str() {
+                "lan" => "Online on the LAN",
+                "tailscale" => "Online over Tailscale",
+                "offline" => "Offline",
+                _ => "Checking",
+            };
+            let controls = widgets::hbox(6);
+            let trusted = gtk::Switch::new();
+            trusted.set_active(c.trusted);
+            trusted.set_valign(gtk::Align::Center);
+            trusted.set_tooltip_text(Some("Trusted: receive files from it without asking"));
+            let weak = Rc::downgrade(self);
+            let edited = c.clone();
+            trusted.connect_state_set(move |_, on| {
+                if let Some(app) = weak.upgrade() {
+                    let mut c = edited.clone();
+                    c.trusted = on;
+                    app.act(move |client| client.save_computer(&c).map_err(|e| e.to_string()));
+                }
+                glib::Propagation::Proceed
+            });
+            let weak = Rc::downgrade(self);
+            let id = c.id.clone();
+            let remove = widgets::two_click("Remove", "Remove?", move || {
+                if let Some(app) = weak.upgrade() {
+                    let id = id.clone();
+                    app.act(move |client| client.remove_computer(&id).map_err(|e| e.to_string()));
+                }
+            });
+            remove.set_valign(gtk::Align::Center);
+            controls.append(&trusted);
+            controls.append(&remove);
+            let desc = format!("{presence} · {}{}", routes.join(" · "), if c.trusted { " · Trusted" } else { "" });
+            card.append(&widgets::row(&c.name, &desc, Some(controls.upcast_ref())));
+        }
+        let weak = Rc::downgrade(self);
+        let (add_row, _) = widgets::button_row(
+            "Add a computer",
+            "By its address on the network or tailnet, or with the pin beside a nearby device.",
+            "Add by address…",
+            move |_| {
+                let weak = weak.clone();
+                widgets::ask_text(
+                    "Add a computer",
+                    "Its IP address or Tailscale name, with :port if not 53317. It needs LocalSend or Share running.",
+                    "",
+                    "Add",
+                    move |address| {
+                        if let Some(app) = weak.upgrade() {
+                            app.act(move |client| client.add_computer(&address).map(|_| ()).map_err(|e| e.to_string()));
+                        }
+                    },
+                );
+            },
+        );
+        card.append(&add_row);
+        self.settings.append(&card);
+
+        self.settings.append(&group("NAS folders"));
+        let card = widgets::vbox(0);
+        card.add_css_class("card");
+        for n in self.nas.borrow().iter() {
+            let controls = widgets::hbox(6);
+            let test = gtk::Button::with_label("Test");
+            test.set_valign(gtk::Align::Center);
+            let weak = Rc::downgrade(self);
+            let id = n.id.clone();
+            test.connect_clicked(move |b| {
+                let Some(app) = weak.upgrade() else { return };
+                b.set_sensitive(false);
+                b.set_label("Testing…");
+                let (client, id, b) = (app.client.clone(), id.clone(), b.clone());
+                let weak = Rc::downgrade(&app);
+                nyx_core::cmd::background(
+                    move || client.test_nas(&id),
+                    move |result| {
+                        b.set_sensitive(true);
+                        b.set_label("Test");
+                        if let Some(app) = weak.upgrade() {
+                            app.toast(&result.unwrap_or_else(|e| e.to_string()));
+                        }
+                    },
+                );
+            });
+            let weak = Rc::downgrade(self);
+            let id = n.id.clone();
+            let remove = widgets::two_click("Remove", "Remove?", move || {
+                if let Some(app) = weak.upgrade() {
+                    let id = id.clone();
+                    app.act(move |client| client.remove_nas(&id).map_err(|e| e.to_string()));
+                }
+            });
+            remove.set_valign(gtk::Align::Center);
+            controls.append(&test);
+            controls.append(&remove);
+            let mut notes = vec![n.uri.clone()];
+            if n.tailscale_uri.is_some() {
+                notes.push("Tailscale fallback".into());
+            }
+            if let Some(u) = &n.username {
+                notes.push(if n.has_password { format!("{u}, password saved") } else { u.clone() });
+            }
+            if n.conflict == "skip" {
+                notes.push("Skips files already there".into());
+            }
+            card.append(&widgets::row(&n.name, &notes.join(" · "), Some(controls.upcast_ref())));
+        }
+        let weak = Rc::downgrade(self);
+        let (add_row, _) = widgets::button_row(
+            "Add a NAS folder",
+            "An SMB, SFTP or NFS share. Files are copied into it; nothing is moved or deleted.",
+            "Add…",
+            move |_| {
+                if let Some(app) = weak.upgrade() {
+                    app.add_nas();
+                }
+            },
+        );
+        card.append(&add_row);
+        self.settings.append(&card);
+
         self.settings.append(&group("About"));
         let card = widgets::vbox(0);
         card.add_css_class("card");
         let version = widgets::label(&format!("Share {}", env!("CARGO_PKG_VERSION")), "dim");
         card.append(&widgets::row("Version", "Nearby sharing speaks the LocalSend protocol.", Some(version.upcast_ref())));
         self.settings.append(&card);
+    }
+}
+
+impl App {
+    /// The Add a NAS folder dialog. The password goes to the Secret Service,
+    /// never to Share's settings file.
+    fn add_nas(self: &Rc<Self>) {
+        let (dialog, card) = widgets::dialog("Add a NAS folder", 440);
+        let field = |title: &str, placeholder: &str| {
+            let l = widgets::label(title, "dim");
+            l.set_xalign(0.0);
+            card.append(&l);
+            let e = gtk::Entry::new();
+            e.set_placeholder_text(Some(placeholder));
+            card.append(&e);
+            e
+        };
+        let name = field("Name", "NAS Documents");
+        let uri = field("Address", "smb://nas.local/Documents/Inbox");
+        let tailscale = field("Address over Tailscale (optional)", "smb://nas.tailnet.ts.net/Documents/Inbox");
+        let user = field("User name (optional)", "");
+        let l = widgets::label("Password (optional)", "dim");
+        l.set_xalign(0.0);
+        card.append(&l);
+        let password = gtk::PasswordEntry::new();
+        password.set_show_peek_icon(true);
+        card.append(&password);
+        let (skip_row, skip) = widgets::switch_row(
+            "Skip files already there",
+            "Otherwise a copy gets a new name, like “report (2).pdf”.",
+            false,
+            |_| {},
+        );
+        card.append(&skip_row);
+        let error = widgets::label("", "error");
+        error.set_wrap(true);
+        error.set_xalign(0.0);
+        error.set_visible(false);
+        card.append(&error);
+        let buttons = widgets::hbox(8);
+        buttons.set_halign(gtk::Align::End);
+        buttons.set_margin_top(6);
+        let cancel = gtk::Button::with_label("Not now");
+        let ok = gtk::Button::with_label("Add");
+        ok.add_css_class("suggested-action");
+        buttons.append(&cancel);
+        buttons.append(&ok);
+        card.append(&buttons);
+        let d = dialog.clone();
+        cancel.connect_clicked(move |_| d.close());
+        let weak = Rc::downgrade(self);
+        let d = dialog.clone();
+        let first = name.clone();
+        let (uri_entry, tailscale_entry, user_entry, password_entry, ok_button) =
+            (uri.clone(), tailscale.clone(), user.clone(), password.clone(), ok.clone());
+        ok.connect_clicked(move |b| {
+            let Some(app) = weak.upgrade() else { return };
+            let text = |e: &gtk::Entry| e.text().trim().to_string();
+            let optional = |e: &gtk::Entry| Some(text(e)).filter(|s| !s.is_empty());
+            let mut info = NasInfo {
+                name: text(&name),
+                uri: text(&uri),
+                tailscale_uri: optional(&tailscale),
+                username: optional(&user),
+                conflict: if skip.is_active() { "skip" } else { "keep-both" }.into(),
+                ..Default::default()
+            };
+            if info.name.is_empty() || info.uri.is_empty() {
+                error.set_text("A name and an address are needed.");
+                error.set_visible(true);
+                return;
+            }
+            let secret = password.text().to_string();
+            b.set_sensitive(false);
+            let (client, b, error, d) = (app.client.clone(), b.clone(), error.clone(), d.clone());
+            nyx_core::cmd::background(
+                move || -> Result<String, String> {
+                    if !secret.is_empty() {
+                        info.id = uuid::Uuid::new_v4().to_string();
+                        nyx_share_nas::secrets::store(&info.id, &info.name, &secret)?;
+                    }
+                    let id = client.save_nas(&info).map_err(|e| e.to_string());
+                    if id.is_err() && !secret.is_empty() {
+                        nyx_share_nas::secrets::clear(&info.id);
+                    }
+                    id
+                },
+                move |result| {
+                    b.set_sensitive(true);
+                    match result {
+                        Ok(_) => d.close(),
+                        Err(e) => {
+                            error.set_text(&e);
+                            error.set_visible(true);
+                        }
+                    }
+                },
+            );
+        });
+        dialog.present();
+        // For checks: `NYX_SHARE_CHECK_NAS=name|address|tailscale|user|password` fills the form and adds.
+        if let Ok(check) = std::env::var("NYX_SHARE_CHECK_NAS") {
+            let parts: Vec<&str> = check.split('|').collect();
+            for (entry, value) in [&first, &uri_entry, &tailscale_entry, &user_entry].into_iter().zip(&parts) {
+                entry.set_text(value);
+            }
+            password_entry.set_text(parts.get(4).copied().unwrap_or_default());
+            ok_button.emit_clicked();
+        }
+        first.grab_focus();
     }
 }
 

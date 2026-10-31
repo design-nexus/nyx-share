@@ -57,9 +57,39 @@ hex SHA-256 of the certificate.
 - Senders present their certificate (mutual TLS). An offer whose claimed
   fingerprint matches the presented certificate is shown with its device key;
   otherwise the sheet says the device is unverified.
-- There is no automatic acceptance in this release. Trusted devices with
-  unattended receiving come with My Computers (Phase 4) and will require a
-  pinned fingerprint.
+- Offers are accepted automatically only from a saved computer marked trusted,
+  and only when the sender proved that computer's key in the TLS handshake. Any
+  other offer, including one from a trusted computer's name or address without
+  its key, asks first. Text messages always ask.
+
+## My computers
+
+A saved computer is a LocalSend device you keep, known by its certificate
+fingerprint. Save one with the pin beside a nearby device, or by address
+(`nyx-share computers add HOST[:PORT]`, or **Add by address…** in the Share
+app): Share connects to the address, takes the key the device presents and
+saves it, so later sends are pinned to that key. Saved computers sit in the
+Devices section of the sheet and stay there when offline.
+
+Sending tries the routes in order (the LAN address first, then the Tailscale
+one, unless `prefer` says otherwise) and checks the key on each. A device met
+on a new address is followed only after it proved the key. Each computer may
+have its own receive folder.
+
+`$XDG_CONFIG_HOME/nyx-share/computers.toml`:
+
+```toml
+[[computer]]
+id = "6f1c…"
+name = "G16 Laptop"
+fingerprint = "9A3F…"            # who it is, whatever its address
+lan = "192.168.1.20"             # optional
+tailscale = "g16.tailnet.ts.net" # optional: a Tailscale IP or MagicDNS name
+port = 53317
+prefer = "auto"                  # "auto" (LAN first), "lan" or "tailscale"
+trusted = false                  # receive from it without asking
+receive_folder = "/home/me/Downloads/G16"   # optional
+```
 
 ## Settings
 

@@ -1,6 +1,7 @@
 //! LocalSend protocol v2 for Nyx Share: discovery, sending and receiving,
 //! compatible with the official LocalSend apps. See docs/LOCALSEND.md.
 
+pub mod computers;
 pub mod discovery;
 pub mod dto;
 pub mod http;
@@ -41,7 +42,7 @@ pub trait Events: Send + Sync {
     fn peers_changed(&self);
     fn offer(&self, offer: &Offer) -> Decision;
     fn refused(&self, offer: &Offer, reason: &str);
-    fn receive_folder(&self) -> PathBuf;
+    fn receive_folder(&self, offer: &Offer) -> PathBuf;
     fn started(&self, offer: &Offer);
     fn progress(&self, session: &str, bytes: u64);
     fn saved(&self, session: &str, path: PathBuf);
@@ -59,6 +60,9 @@ pub struct Nearby {
     /// Look for LocalSend on tailnet devices too.
     tailscale: bool,
     probing: std::sync::atomic::AtomicBool,
+    computers: std::sync::RwLock<Vec<computers::Computer>>,
+    /// Computer id to how it was last reached (None: tried and failed).
+    reach: Mutex<HashMap<String, Option<computers::Reach>>>,
 }
 
 struct Bridge(Weak<Nearby>);
@@ -93,8 +97,8 @@ impl receiver::Host for Bridge {
             n.events.refused(offer, reason);
         }
     }
-    fn receive_folder(&self) -> PathBuf {
-        self.0.upgrade().map(|n| n.events.receive_folder()).unwrap_or_default()
+    fn receive_folder(&self, offer: &Offer) -> PathBuf {
+        self.0.upgrade().map(|n| n.events.receive_folder(offer)).unwrap_or_default()
     }
     fn started(&self, offer: &Offer) {
         if let Some(n) = self.0.upgrade() {
@@ -144,6 +148,8 @@ impl Nearby {
             stopped: std::sync::atomic::AtomicBool::new(false),
             tailscale,
             probing: std::sync::atomic::AtomicBool::new(false),
+            computers: std::sync::RwLock::new(Vec::new()),
+            reach: Mutex::new(HashMap::new()),
         });
         let receiver = receiver::Receiver::start(&nearby.identity, Arc::new(Bridge(Arc::downgrade(&nearby))), PORT)?;
         nearby.me.lock().unwrap_or_else(|e| e.into_inner()).port = receiver.port;
@@ -265,6 +271,9 @@ impl Nearby {
         if key == self.identity.fingerprint || key.is_empty() {
             return;
         }
+        if verified {
+            self.note_reach(&key, addr, info.port);
+        }
         // The local network first: a device seen there recently keeps that address.
         let lan = self.peer(&key).filter(|p| !tailnet::is_tailscale(&p.addr) && p.seen.elapsed() < Duration::from_secs(120));
         let (addr, info) = match lan {
@@ -303,7 +312,7 @@ impl Nearby {
         }
     }
 
-    fn peer(&self, fingerprint: &str) -> Option<Peer> {
+    pub(crate) fn peer(&self, fingerprint: &str) -> Option<Peer> {
         self.peers.lock().unwrap_or_else(|e| e.into_inner()).get(&fingerprint.to_ascii_uppercase()).cloned()
     }
 }
@@ -339,6 +348,7 @@ impl Provider for NearbyProvider {
         self.0
             .peers()
             .into_iter()
+            .filter(|p| self.0.computer_with_key(&p.info.fingerprint).is_none())
             .map(|p| {
                 let encrypted = p.info.protocol == "https";
                 Destination {
@@ -368,42 +378,46 @@ impl Provider for NearbyProvider {
         let fingerprint = destination.strip_prefix(PREFIX).unwrap_or(destination);
         let peer = self.0.peer(fingerprint).ok_or_else(|| SendError::failed("That device isn't nearby any more"))?;
         let target = sender::Target { fingerprint: fingerprint.to_string(), addr: peer.addr, port: peer.info.port };
-        let files: Vec<sender::Outgoing<'_>> = task
-            .items
-            .iter()
-            .map(|item| match &item.data {
-                Data::Text(text) => sender::Outgoing {
-                    name: format!("{}.txt", uuid::Uuid::new_v4()),
-                    size: text.len() as u64,
-                    mime: "text/plain".into(),
-                    preview: Some(text.clone()),
-                    source: sender::Source::Bytes(text.as_bytes()),
-                },
-                Data::File(file) => sender::Outgoing {
-                    name: item.info.name.clone(),
-                    size: item.info.size,
-                    mime: item.info.mime.clone().unwrap_or_else(|| "application/octet-stream".into()),
-                    preview: None,
-                    source: sender::Source::File(file),
-                },
-            })
-            .collect();
-        let who = &peer.info.alias;
-        match sender::send(&self.0.identity, &self.0.me(), &target, &files, task.cancel, task.progress) {
-            Ok(0) if files.iter().all(|f| f.preview.is_some()) => {
-                Ok(Outcome { message: format!("Sent to {who}"), outputs: Vec::new() })
-            }
-            Ok(0) => Err(SendError::failed(format!("{who} didn't take any of the files"))),
-            Ok(n) if n < files.len() => {
-                Ok(Outcome { message: format!("{who} took {n} of {} items", files.len()), outputs: Vec::new() })
-            }
-            Ok(n) => Ok(Outcome {
-                message: format!("Sent {} to {who}", if n == 1 { "1 item".into() } else { format!("{n} items") }),
-                outputs: Vec::new(),
-            }),
-            Err(sender::Error::Cancelled) => Err(SendError::Cancelled { outputs: Vec::new() }),
-            Err(sender::Error::Declined) => Err(SendError::failed(format!("{who} declined"))),
-            Err(e) => Err(SendError::failed(e.to_string())),
+        deliver(&self.0, &target, &peer.info.alias, task)
+    }
+}
+
+/// Send a task's items to one LocalSend device.
+pub(crate) fn deliver(nearby: &Nearby, target: &sender::Target, who: &str, task: &Task<'_>) -> Result<Outcome, SendError> {
+    let files: Vec<sender::Outgoing<'_>> = task
+        .items
+        .iter()
+        .map(|item| match &item.data {
+            Data::Text(text) => sender::Outgoing {
+                name: format!("{}.txt", uuid::Uuid::new_v4()),
+                size: text.len() as u64,
+                mime: "text/plain".into(),
+                preview: Some(text.clone()),
+                source: sender::Source::Bytes(text.as_bytes()),
+            },
+            Data::File(file) => sender::Outgoing {
+                name: item.info.name.clone(),
+                size: item.info.size,
+                mime: item.info.mime.clone().unwrap_or_else(|| "application/octet-stream".into()),
+                preview: None,
+                source: sender::Source::File(file),
+            },
+        })
+        .collect();
+    match sender::send(&nearby.identity, &nearby.me(), target, &files, task.cancel, task.progress) {
+        Ok(0) if files.iter().all(|f| f.preview.is_some()) => {
+            Ok(Outcome { message: format!("Sent to {who}"), outputs: Vec::new() })
         }
+        Ok(0) => Err(SendError::failed(format!("{who} didn't take any of the files"))),
+        Ok(n) if n < files.len() => {
+            Ok(Outcome { message: format!("{who} took {n} of {} items", files.len()), outputs: Vec::new() })
+        }
+        Ok(n) => Ok(Outcome {
+            message: format!("Sent {} to {who}", if n == 1 { "1 item".into() } else { format!("{n} items") }),
+            outputs: Vec::new(),
+        }),
+        Err(sender::Error::Cancelled) => Err(SendError::Cancelled { outputs: Vec::new() }),
+        Err(sender::Error::Declined) => Err(SendError::failed(format!("{who} declined"))),
+        Err(e) => Err(SendError::failed(e.to_string())),
     }
 }

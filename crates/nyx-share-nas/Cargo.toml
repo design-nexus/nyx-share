@@ -1,0 +1,16 @@
+[package]
+name = "nyx-share-nas"
+description = "NAS destinations for Nyx Share, through GVfs (SMB, SFTP, NFS)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+nyx-share-core.workspace = true
+nyx-share-providers.workspace = true
+serde.workspace = true
+uuid.workspace = true
+gio = "0.22"
+glib = "0.22"

@@ -37,7 +37,7 @@ impl Host for TestHost {
     fn refused(&self, _: &Offer, reason: &str) {
         panic!("refused: {reason}");
     }
-    fn receive_folder(&self) -> PathBuf {
+    fn receive_folder(&self, _: &Offer) -> PathBuf {
         self.folder.clone()
     }
     fn started(&self, _: &Offer) {}

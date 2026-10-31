@@ -5,6 +5,7 @@ mod caller;
 mod config;
 mod items;
 mod launch;
+mod nas;
 mod nearby;
 mod notify;
 mod service;
@@ -23,8 +24,11 @@ fn main() -> anyhow::Result<()> {
         println!("nyx-share-daemon {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-    let providers = nyx_share_providers::builtin().into_iter().map(Arc::from).collect();
-    let state = Arc::new(State::new(providers, config::load()));
+    let mut providers: Vec<Arc<dyn nyx_share_providers::Provider>> =
+        nyx_share_providers::builtin().into_iter().map(Arc::from).collect();
+    let nas_folders = Arc::new(std::sync::RwLock::new(nas::load()));
+    providers.push(Arc::new(nyx_share_nas::NasProvider(nas_folders.clone())));
+    let state = Arc::new(State::new(providers, config::load(), nas_folders));
     async_io::block_on(async {
         let conn = zbus::connection::Builder::session()?
             .serve_at(PATH, service::Share1(state.clone()))?

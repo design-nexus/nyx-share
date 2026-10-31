@@ -373,19 +373,34 @@ fn install_actions(sheet: &Rc<Sheet>) {
         });
         group.add_action(&action);
     }
+    let action = gio::SimpleAction::new("subfolder", Some(glib::VariantTy::STRING));
+    let weak = Rc::downgrade(sheet);
+    action.connect_activate(move |_, target| {
+        let (Some(sheet), Some(id)) = (weak.upgrade(), target.and_then(|t| t.get::<String>())) else { return };
+        sheet.ask_subfolder(&id);
+    });
+    group.add_action(&action);
     sheet.window.insert_action_group("dest", Some(&group));
 }
 
 impl Sheet {
-    /// For checks and screenshots: `NYX_SHARE_CHECK_CHOOSE=save:/tmp/a;clipboard`
-    /// chooses those destinations as if clicked, folders included.
+    /// For checks and screenshots: `NYX_SHARE_CHECK_CHOOSE=save:/tmp/a;clipboard;nas:ID>Sub/Folder`
+    /// chooses those destinations as if clicked, folders and subfolders included.
     fn check_choices(self: &Rc<Self>) {
         let Ok(choices) = std::env::var("NYX_SHARE_CHECK_CHOOSE") else { return };
         for choice in choices.split(';').filter(|c| !c.is_empty()) {
-            let (id, folder) = choice.split_once(':').map_or((choice, None), |(id, f)| (id, Some(f)));
+            let (choice, sub) = choice.split_once('>').map_or((choice, None), |(c, s)| (c, Some(s)));
+            let (id, folder) = match self.destination(choice) {
+                Some(_) => (choice, None),
+                None => choice.split_once(':').map_or((choice, None), |(id, f)| (id, Some(f))),
+            };
             let Some(d) = self.destination(id) else { continue };
-            let options = folder.map(|f| serde_json::json!({ "folder": f }).to_string()).unwrap_or_else(|| "{}".into());
-            self.send(d, options);
+            let options = match (folder, sub) {
+                (Some(f), _) => serde_json::json!({ "folder": f }),
+                (None, Some(s)) => serde_json::json!({ "subfolder": s }),
+                (None, None) => serde_json::json!({}),
+            };
+            self.send(d, options.to_string());
         }
     }
 
@@ -554,6 +569,11 @@ impl Sheet {
             i.set_action_and_target_value(Some(&format!("dest.{action}")), Some(&id.to_variant()));
             i
         };
+        if d.provider == "nas" && d.available {
+            let send = gio::Menu::new();
+            send.append_item(&item("Send to a subfolder…", "subfolder"));
+            menu.append_section(None, &send);
+        }
         let order = gio::Menu::new();
         order.append_item(&item(if d.pinned { "Unpin" } else { "Pin" }, "pin"));
         order.append_item(&item("Move left", "left"));
@@ -570,6 +590,24 @@ impl Sheet {
             glib::idle_add_local_once(move || p.unparent());
         });
         popover.popup();
+    }
+
+    /// Send to a folder under a NAS folder, made if it doesn't exist.
+    fn ask_subfolder(self: &Rc<Self>, id: &str) {
+        let Some(d) = self.destination(id) else { return };
+        let weak = Rc::downgrade(self);
+        let name = d.name.clone();
+        widgets::ask_text(
+            "Send to a subfolder",
+            &format!("A folder in {name}, made if it isn't there. Use / for a folder inside a folder."),
+            "",
+            "Send",
+            move |sub| {
+                if let Some(sheet) = weak.upgrade() {
+                    sheet.send(d.clone(), serde_json::json!({ "subfolder": sub }).to_string());
+                }
+            },
+        );
     }
 
     /// Pin, hide or move a destination, then show the new arrangement.
@@ -957,7 +995,13 @@ fn job_title(job: &Job, d: &Destination, options: &str) -> String {
                     .unwrap_or_else(|| "the folder".into());
                 format!("Saving {what} to {place}")
             } else {
-                format!("Sending {what} to {}", d.name)
+                let sub: Option<String> = serde_json::from_str::<serde_json::Value>(options)
+                    .ok()
+                    .and_then(|v| v.get("subfolder").and_then(|f| f.as_str()).map(str::to_string));
+                match sub {
+                    Some(sub) => format!("Sending {what} to {} / {sub}", d.name),
+                    None => format!("Sending {what} to {}", d.name),
+                }
             }
         }
     }
