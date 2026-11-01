@@ -82,6 +82,7 @@ impl Share1 {
     fn get_capabilities(&self) -> String {
         self.0.touch();
         let limits = Limits::default();
+        let disabled = self.0.preferences().disabled;
         let providers = self
             .0
             .providers()
@@ -95,6 +96,7 @@ impl Share1 {
                     kinds: p.kinds(),
                     available: dests.iter().any(|d| d.available),
                     status,
+                    enabled: !disabled.iter().any(|d| d == p.id()),
                 }
             })
             .collect();
@@ -173,7 +175,40 @@ impl Share1 {
 
     fn list_jobs(&self) -> String {
         self.0.touch();
-        json(&self.0.jobs())
+        let jobs: Vec<_> = self
+            .0
+            .jobs()
+            .into_iter()
+            .map(|mut j| {
+                j.retryable = self.0.retryable(&j.id);
+                j
+            })
+            .collect();
+        json(&jobs)
+    }
+
+    /// Run a failed job again as a new job; returns its id. Not for sandboxed callers.
+    async fn retry_job(
+        &self,
+        id: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<String> {
+        self.0.touch();
+        if caller::identify(conn, &header).await?.sandboxed {
+            return Err(fdo::Error::AccessDenied("Sandboxed apps can't retry transfers".into()));
+        }
+        self.0.retry(id)
+    }
+
+    /// Forget finished transfers; running ones stay.
+    async fn clear_history(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> fdo::Result<()> {
+        self.0.touch();
+        if caller::identify(conn, &header).await?.sandboxed {
+            return Err(fdo::Error::AccessDenied("Sandboxed apps can't clear the history".into()));
+        }
+        self.0.clear_history();
+        Ok(())
     }
 
     fn get_job(&self, id: &str) -> fdo::Result<String> {
@@ -194,7 +229,11 @@ impl Share1 {
         self.0.touch();
         let update: PreferencesUpdate = serde_json::from_str(update)
             .map_err(|e| fdo::Error::InvalidArgs(format!("The preferences aren't valid JSON: {e}")))?;
+        let history = update.history.is_some();
         self.0.update_prefs(update).map_err(|e| fdo::Error::Failed(format!("Couldn't save the destinations: {e}")))?;
+        if history {
+            self.0.trim_history();
+        }
         let _ = Self::destinations_changed(&emitter).await;
         Ok(())
     }

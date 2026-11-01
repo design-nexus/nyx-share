@@ -45,6 +45,7 @@ impl Provider for Clipboard {
             status: problem,
             pinned: false,
             hidden: false,
+            default: false,
         }]
     }
 

@@ -178,6 +178,7 @@ impl Provider for Cloud {
                 }),
                 pinned: false,
                 hidden: false,
+                default: false,
             })
             .collect()
     }

@@ -65,6 +65,7 @@ impl Provider for Notes {
             status: None,
             pinned: false,
             hidden: false,
+            default: false,
         }]
     }
 

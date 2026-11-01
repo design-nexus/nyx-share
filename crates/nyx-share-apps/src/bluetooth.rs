@@ -166,6 +166,7 @@ impl Provider for Bluetooth {
                 }),
                 pinned: false,
                 hidden: false,
+                default: false,
             })
             .collect()
     }

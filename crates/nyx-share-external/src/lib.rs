@@ -258,6 +258,7 @@ impl Provider for External {
                 }),
                 pinned: false,
                 hidden: false,
+                default: false,
             })
             .collect()
     }

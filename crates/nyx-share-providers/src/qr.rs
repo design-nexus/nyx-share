@@ -108,6 +108,7 @@ impl Provider for Qr {
             status: None,
             pinned: false,
             hidden: false,
+            default: false,
         }]
     }
 

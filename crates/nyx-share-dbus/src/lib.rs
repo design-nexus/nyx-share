@@ -48,6 +48,10 @@ pub trait Share {
 
     fn cancel_job(&self, id: &str) -> zbus::Result<()>;
 
+    fn retry_job(&self, id: &str) -> zbus::Result<String>;
+
+    fn clear_history(&self) -> zbus::Result<()>;
+
     /// JSON [`nyx_share_core::PreferencesUpdate`]: the lists it contains replace the saved ones.
     fn set_destination_preferences(&self, update: &str) -> zbus::Result<()>;
 
@@ -252,6 +256,13 @@ pub struct ProviderInfo {
     pub available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Turned on in Settings → Sharing (`disabled` in the preferences).
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Options for `Share`, `ShareTo` and `Choose`. Unknown keys are ignored.

@@ -245,6 +245,7 @@ fn keeps_destination_preferences() {
         order: Some(vec!["save".into()]),
         pinned: Some(vec!["save".into()]),
         hidden: Some(vec!["clipboard".into()]),
+        ..Default::default()
     };
     client.set_preferences(&update).unwrap();
     let all = client.destinations(&[], 0).unwrap();
@@ -253,7 +254,14 @@ fn keeps_destination_preferences() {
     assert!(all.iter().find(|d| d.id == "clipboard").unwrap().hidden);
     let saved = std::fs::read_to_string(service().root.join("config/nyx-share/destinations.toml")).unwrap();
     assert!(saved.contains("clipboard"));
-    client.set_preferences(&PreferencesUpdate { pinned: Some(vec![]), hidden: Some(vec![]), order: Some(vec![]) }).unwrap();
+    client
+        .set_preferences(&PreferencesUpdate {
+            pinned: Some(vec![]),
+            hidden: Some(vec![]),
+            order: Some(vec![]),
+            ..Default::default()
+        })
+        .unwrap();
 }
 
 #[test]
@@ -280,4 +288,52 @@ fn keeps_nas_passwords_out_of_the_settings_file() {
     assert!(!root.join("secrets").join(&id).exists());
     assert!(!client.nas().unwrap().into_iter().find(|n| n.id == id).unwrap().has_password);
     client.remove_nas(&id).unwrap();
+}
+
+#[test]
+#[ignore]
+fn retries_failed_jobs_and_keeps_settings() {
+    let client = Client::connect().unwrap();
+    let target = service().root.join("retry-target");
+    let _ = std::fs::remove_dir_all(&target);
+    let mut content = Content::new();
+    content.text("try again");
+    let options = ShareOptions { folder: Some(target.display().to_string()), notify: Some(false), ..Default::default() };
+    let id = client.share_to("save", &content, &options).unwrap();
+    assert_eq!(client.wait(&id, |_| {}).unwrap().state, JobState::Failed, "the folder isn't there yet");
+    assert!(client.jobs().unwrap().iter().any(|j| j.id == id && j.retryable));
+    std::fs::create_dir_all(&target).unwrap();
+    let again = client.retry(&id).unwrap();
+    assert_eq!(client.wait(&again, |_| {}).unwrap().state, JobState::Completed);
+    assert_eq!(std::fs::read_to_string(target.join("Shared text.txt")).unwrap(), "try again");
+    assert!(client.retry(&id).is_err(), "a retry is used once");
+
+    // A provider turned off: gone from the lists and refused by name.
+    client
+        .set_preferences(&PreferencesUpdate {
+            disabled: Some(vec!["qr".into()]),
+            default: Some("save".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    let all = client.destinations(&[], 0).unwrap();
+    assert!(!all.iter().any(|d| d.id == "qr"));
+    assert!(all[0].id == "save" && all[0].default, "the default comes first");
+    let caps = client.capabilities().unwrap();
+    assert!(!caps.providers.iter().find(|p| p.id == "qr").unwrap().enabled);
+    let mut link = Content::new();
+    link.url("https://example.com");
+    let off = client.share_to("qr", &link, &ShareOptions::default()).unwrap_err().to_string();
+    assert!(off.contains("turned off"), "{off}");
+    client
+        .set_preferences(&PreferencesUpdate { disabled: Some(vec![]), default: Some(String::new()), ..Default::default() })
+        .unwrap();
+    assert!(client.destinations(&[], 0).unwrap().iter().any(|d| d.id == "qr" && !d.default));
+
+    // The history keeps as many as asked, and clears.
+    client.set_preferences(&PreferencesUpdate { history: Some(1), ..Default::default() }).unwrap();
+    assert!(client.jobs().unwrap().iter().filter(|j| j.state.finished()).count() <= 1);
+    client.clear_history().unwrap();
+    assert!(client.jobs().unwrap().iter().all(|j| !j.state.finished()));
+    client.set_preferences(&PreferencesUpdate { history: Some(50), ..Default::default() }).unwrap();
 }

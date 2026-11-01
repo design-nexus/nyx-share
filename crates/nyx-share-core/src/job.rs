@@ -45,6 +45,9 @@ pub struct Job {
     /// What happened, in a sentence: "Copied to the clipboard", or the error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// A failed job the service can still run again (`RetryJob`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub retryable: bool,
     /// What the destination made, such as the paths of saved files.
     #[serde(default)]
     pub outputs: Vec<String>,

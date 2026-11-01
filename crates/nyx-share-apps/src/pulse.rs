@@ -97,6 +97,7 @@ impl Provider for Pulse {
                 status: Some("Telegram".into()),
                 pinned: false,
                 hidden: false,
+                default: false,
             })
             .collect()
     }

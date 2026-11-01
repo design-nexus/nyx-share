@@ -66,6 +66,16 @@ pub struct State {
     last_activity: Mutex<Instant>,
     /// Slow calls still being answered, such as TestNas.
     calls: AtomicUsize,
+    /// What failed jobs need to run again, for a while: their items stay open.
+    retries: Mutex<HashMap<String, Retry>>,
+}
+
+struct Retry {
+    destination: String,
+    items: Arc<Vec<Payload>>,
+    options: SendOptions,
+    notify: bool,
+    at: Instant,
 }
 
 /// Keeps the service from exiting idle while a slow call runs.
@@ -78,8 +88,9 @@ impl Drop for Call<'_> {
     }
 }
 
-/// Finished jobs kept for ListJobs.
-const HISTORY: usize = 50;
+/// Failed jobs keep their items this long, so they can be retried.
+const RETRY_FOR: Duration = Duration::from_secs(30 * 60);
+const RETRY_MAX: usize = 20;
 /// An unanswered Share Sheet request is dropped after this long.
 const REQUEST_LIFETIME: Duration = Duration::from_secs(30 * 60);
 
@@ -100,7 +111,7 @@ fn load_history() -> Vec<Job> {
     std::fs::read_to_string(history_path())
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<Job>>(&s).ok())
-        .map(|jobs| jobs.into_iter().filter(|j| j.state.finished()).take(HISTORY).collect())
+        .map(|jobs| jobs.into_iter().filter(|j| j.state.finished()).take(500).collect())
         .unwrap_or_default()
 }
 
@@ -136,6 +147,7 @@ impl State {
             holders: Mutex::new(std::collections::HashSet::new()),
             last_activity: Mutex::new(Instant::now()),
             calls: AtomicUsize::new(0),
+            retries: Mutex::new(HashMap::new()),
         }
     }
 
@@ -203,6 +215,10 @@ impl State {
         self.destinations().into_iter().filter(|d| d.accepts(kinds, count)).collect()
     }
 
+    pub fn preferences(&self) -> Preferences {
+        lock(&self.prefs).clone()
+    }
+
     pub fn update_prefs(&self, update: nyx_share_core::PreferencesUpdate) -> std::io::Result<()> {
         let mut prefs = lock(&self.prefs);
         prefs.merge(update);
@@ -241,7 +257,8 @@ impl State {
         let mut jobs = lock(&self.jobs);
         let now = Instant::now();
         jobs.push(Entry { job, cancel, notify, quiet_for, started: now, last_emit: now });
-        let mut excess = jobs.iter().filter(|e| e.job.state.finished()).count().saturating_sub(HISTORY);
+        let keep = lock(&self.prefs).history_limit();
+        let mut excess = jobs.iter().filter(|e| e.job.state.finished()).count().saturating_sub(keep);
         jobs.retain(|e| {
             let old = excess > 0 && e.job.state.finished();
             excess -= old as usize;
@@ -250,8 +267,9 @@ impl State {
     }
 
     fn save_history(&self) {
+        let keep = lock(&self.prefs).history_limit();
         let finished: Vec<Job> =
-            lock(&self.jobs).iter().rev().filter(|e| e.job.state.finished()).map(|e| e.job.clone()).take(HISTORY).collect();
+            lock(&self.jobs).iter().rev().filter(|e| e.job.state.finished()).map(|e| e.job.clone()).take(keep).collect();
         let path = history_path();
         let Some(dir) = path.parent() else { return };
         if std::fs::create_dir_all(dir).is_err() {
@@ -291,6 +309,14 @@ impl State {
         notify: bool,
         quiet_for: Duration,
     ) -> fdo::Result<String> {
+        let disabled = lock(&self.prefs).disabled.clone();
+        if let Some(p) = self
+            .providers()
+            .into_iter()
+            .find(|p| disabled.iter().any(|d| d == p.id()) && p.destinations().iter().any(|d| d.id == destination))
+        {
+            return Err(fdo::Error::Failed(format!("{} is turned off in Settings → Sharing", p.name())));
+        }
         let (provider, dest) = self
             .providers()
             .into_iter()
@@ -323,6 +349,7 @@ impl State {
             })),
             bytes_done: 0,
             step: None,
+            retryable: false,
             bytes_total: items.iter().map(Payload::size).sum(),
             message: None,
             outputs: Vec::new(),
@@ -333,8 +360,59 @@ impl State {
         self.add(job, cancel.clone(), notify, quiet_for);
         let state = self.clone();
         let (dest_id, job_id) = (dest.id.clone(), id.clone());
-        std::thread::spawn(move || state.run(provider, &dest_id, &job_id, &items, &options, &cancel));
+        std::thread::spawn(move || {
+            state.run(provider, &dest_id, &job_id, &items, &options, &cancel);
+            if state.job(&job_id).is_some_and(|j| j.state == JobState::Failed) {
+                let mut retries = lock(&state.retries);
+                retries.retain(|_, r| r.at.elapsed() < RETRY_FOR);
+                while retries.len() >= RETRY_MAX {
+                    let Some(oldest) = retries.iter().min_by_key(|(_, r)| r.at).map(|(id, _)| id.clone()) else { break };
+                    retries.remove(&oldest);
+                }
+                retries.insert(job_id, Retry { destination: dest_id, items, options, notify, at: Instant::now() });
+            }
+        });
         Ok(id)
+    }
+
+    /// Run a failed job again, as a new job, while its items are still kept.
+    pub fn retry(self: &Arc<Self>, id: &str) -> fdo::Result<String> {
+        let retry = {
+            let mut retries = lock(&self.retries);
+            retries.retain(|_, r| r.at.elapsed() < RETRY_FOR);
+            retries.remove(id)
+        };
+        let Some(r) = retry else {
+            return Err(fdo::Error::Failed("That transfer can't be retried from here any more; share it again".into()));
+        };
+        self.start(&r.destination, r.items, r.options, r.notify, Duration::ZERO)
+    }
+
+    /// Whether a failed job can still be retried.
+    pub fn retryable(&self, id: &str) -> bool {
+        lock(&self.retries).get(id).is_some_and(|r| r.at.elapsed() < RETRY_FOR)
+    }
+
+    /// Forget finished transfers (running ones stay), and their retries.
+    pub fn clear_history(&self) {
+        lock(&self.jobs).retain(|e| !e.job.state.finished());
+        lock(&self.retries).clear();
+        self.save_history();
+    }
+
+    /// Trim the history to the current limit.
+    pub fn trim_history(&self) {
+        let keep = lock(&self.prefs).history_limit();
+        {
+            let mut jobs = lock(&self.jobs);
+            let mut excess = jobs.iter().filter(|e| e.job.state.finished()).count().saturating_sub(keep);
+            jobs.retain(|e| {
+                let old = excess > 0 && e.job.state.finished();
+                excess -= old as usize;
+                !old
+            });
+        }
+        self.save_history();
     }
 
     fn run(
@@ -403,6 +481,7 @@ impl State {
             summary: summarize(offer.files.iter().map(|f| f.file_name.as_str())),
             bytes_done: 0,
             step: None,
+            retryable: false,
             bytes_total: offer.total,
             message: None,
             outputs: Vec::new(),

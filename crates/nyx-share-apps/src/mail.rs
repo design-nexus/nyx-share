@@ -64,6 +64,7 @@ impl Provider for Mail {
             status: None,
             pinned: false,
             hidden: false,
+            default: false,
         }]
     }
 

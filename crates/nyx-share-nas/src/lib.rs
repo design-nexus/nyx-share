@@ -131,6 +131,7 @@ impl Provider for NasProvider {
                 }),
                 pinned: false,
                 hidden: false,
+                default: false,
             })
             .collect()
     }

@@ -222,6 +222,7 @@ impl Provider for FluxProvider {
                 status: Some(if d.online { "Flux".into() } else { "Offline · Flux sends files when it's back".into() }),
                 pinned: false,
                 hidden: false,
+                default: false,
             })
             .collect()
     }

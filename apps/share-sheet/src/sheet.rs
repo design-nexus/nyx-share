@@ -582,8 +582,18 @@ impl Sheet {
         ids.get(child.index() as usize).cloned()
     }
 
+    /// Focus the default destination, so Enter shares there, or else the first.
     fn focus_first(&self) {
-        if let Some(child) = self.flows.borrow().first().and_then(|(f, _)| f.child_at_index(0)) {
+        let default = self.info.borrow().destinations.iter().find(|d| d.default).map(|d| d.id.clone());
+        let flows = self.flows.borrow();
+        let tile = default.and_then(|id| {
+            flows.iter().find_map(|(f, ids)| ids.iter().position(|x| *x == id).and_then(|i| f.child_at_index(i as i32)))
+        });
+        if let Some(child) = tile {
+            child.grab_focus();
+            return;
+        }
+        if let Some(child) = flows.first().and_then(|(f, _)| f.child_at_index(0)) {
             child.grab_focus();
         }
     }
@@ -1248,6 +1258,7 @@ mod tests {
             summary: None,
             bytes_done: done,
             step: None,
+            retryable: false,
             bytes_total: 10,
             message: None,
             outputs: Vec::new(),

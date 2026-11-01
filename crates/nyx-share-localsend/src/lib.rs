@@ -369,6 +369,7 @@ impl Provider for NearbyProvider {
                     }),
                     pinned: false,
                     hidden: false,
+                    default: false,
                 }
             })
             .collect()

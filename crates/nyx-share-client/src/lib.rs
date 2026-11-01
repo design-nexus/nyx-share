@@ -243,6 +243,16 @@ impl Client {
         Ok(self.proxy.cancel_job(id)?)
     }
 
+    /// Run a failed job again (while the service still has its items); the new job's id.
+    pub fn retry(&self, id: &str) -> Result<String, Error> {
+        Ok(self.proxy.retry_job(id)?)
+    }
+
+    /// Forget finished transfers.
+    pub fn clear_history(&self) -> Result<(), Error> {
+        Ok(self.proxy.clear_history()?)
+    }
+
     pub fn set_preferences(&self, update: &PreferencesUpdate) -> Result<(), Error> {
         Ok(self.proxy.set_destination_preferences(&to_json(update))?)
     }

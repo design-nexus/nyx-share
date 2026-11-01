@@ -39,6 +39,9 @@ pub struct Destination {
     pub pinned: bool,
     #[serde(default)]
     pub hidden: bool,
+    /// The user's default: listed first and focused in the Share Sheet.
+    #[serde(default)]
+    pub default: bool,
 }
 
 impl Destination {
@@ -58,7 +61,18 @@ pub struct Preferences {
     pub order: Vec<String>,
     pub pinned: Vec<String>,
     pub hidden: Vec<String>,
+    /// Providers turned off: their destinations aren't offered at all.
+    pub disabled: Vec<String>,
+    /// The destination listed first and focused in the Share Sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    /// How many finished transfers are remembered (50 if unset, at most 500).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<u32>,
 }
+
+/// Finished transfers kept when the user hasn't chosen.
+pub const HISTORY: u32 = 50;
 
 impl Preferences {
     /// Apply a partial update: each list present in `update` replaces the current one.
@@ -72,6 +86,20 @@ impl Preferences {
         if let Some(hidden) = update.hidden {
             self.hidden = dedup(hidden);
         }
+        if let Some(disabled) = update.disabled {
+            self.disabled = dedup(disabled);
+        }
+        if let Some(default) = update.default {
+            self.default = Some(default).filter(|d| !d.is_empty() && d.len() <= 512);
+        }
+        if let Some(history) = update.history {
+            self.history = Some(history.min(500));
+        }
+    }
+
+    /// How many finished transfers to keep.
+    pub fn history_limit(&self) -> usize {
+        self.history.unwrap_or(HISTORY).min(500) as usize
     }
 }
 
@@ -81,6 +109,11 @@ pub struct PreferencesUpdate {
     pub order: Option<Vec<String>>,
     pub pinned: Option<Vec<String>>,
     pub hidden: Option<Vec<String>>,
+    /// Provider ids to turn off.
+    pub disabled: Option<Vec<String>>,
+    /// The default destination; an empty string clears it.
+    pub default: Option<String>,
+    pub history: Option<u32>,
 }
 
 fn dedup(ids: Vec<String>) -> Vec<String> {
@@ -91,11 +124,16 @@ fn dedup(ids: Vec<String>) -> Vec<String> {
 /// Mark pinned and hidden destinations and sort them: ids in `order` first, in
 /// that order, then the rest as providers listed them.
 pub fn arrange(mut dests: Vec<Destination>, prefs: &Preferences) -> Vec<Destination> {
+    dests.retain(|d| !prefs.disabled.contains(&d.provider));
     for d in &mut dests {
         d.pinned = prefs.pinned.contains(&d.id);
         d.hidden = prefs.hidden.contains(&d.id);
+        d.default = prefs.default.as_deref() == Some(d.id.as_str());
     }
-    let rank = |d: &Destination| prefs.order.iter().position(|id| *id == d.id).unwrap_or(usize::MAX);
+    let rank = |d: &Destination| match d.default {
+        true => (0, 0),
+        false => (1, prefs.order.iter().position(|id| *id == d.id).unwrap_or(usize::MAX)),
+    };
     dests.sort_by_key(rank);
     dests
 }
@@ -120,6 +158,7 @@ mod tests {
             status: None,
             pinned: false,
             hidden: false,
+            default: false,
         }
     }
 

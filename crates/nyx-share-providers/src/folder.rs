@@ -38,6 +38,7 @@ impl Provider for Folder {
             status: None,
             pinned: false,
             hidden: false,
+            default: false,
         }]
     }
 

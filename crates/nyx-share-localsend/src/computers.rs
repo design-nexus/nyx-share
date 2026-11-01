@@ -268,6 +268,7 @@ impl Provider for ComputersProvider {
                     ),
                     pinned: false,
                     hidden: false,
+                    default: false,
                 }
             })
             .collect()
