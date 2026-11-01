@@ -148,6 +148,9 @@ impl Provider for NasProvider {
 }
 
 /// Run GVfs work that needs a main loop (mounting) on this worker thread.
+/// How long one attempt to mount may take; slow SMB servers need about a minute.
+const MOUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
 fn with_context<T>(f: impl FnOnce(&glib::MainContext) -> T) -> T {
     let ctx = glib::MainContext::new();
     ctx.with_thread_default(|| f(&ctx)).expect("a fresh context is free")
@@ -223,16 +226,35 @@ fn mount_once(nas: &Nas, folder: &gio::File, cancellable: &gio::Cancellable) -> 
         let result = std::rc::Rc::new(std::cell::RefCell::new(None));
         let main = glib::MainLoop::new(Some(ctx), false);
         let (r, m) = (result.clone(), main.clone());
-        folder.mount_enclosing_volume(gio::MountMountFlags::NONE, Some(&op), Some(cancellable), move |res| {
+        // Its own cancellable, so a timeout doesn't cancel the rest of the job.
+        let attempt = gio::Cancellable::new();
+        let relay = attempt.clone();
+        let handler = cancellable.connect_cancelled(move |_| relay.cancel());
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let (late, give_up) = (timed_out.clone(), attempt.clone());
+        let timer = glib::timeout_source_new(MOUNT_TIMEOUT, None, glib::Priority::DEFAULT, move || {
+            late.store(true, Ordering::Relaxed);
+            give_up.cancel();
+            glib::ControlFlow::Break
+        });
+        timer.attach(Some(ctx));
+        folder.mount_enclosing_volume(gio::MountMountFlags::NONE, Some(&op), Some(&attempt), move |res| {
             *r.borrow_mut() = Some(res);
             m.quit();
         });
         main.run();
+        timer.destroy();
+        if let Some(handler) = handler {
+            cancellable.disconnect_cancelled(handler);
+        }
         let outcome = result.borrow_mut().take();
         let plain = |m: String| (m, false);
         match outcome {
             Some(Ok(())) => Ok(()),
             Some(Err(e)) if e.matches(gio::IOErrorEnum::AlreadyMounted) => Ok(()),
+            Some(Err(_)) if timed_out.load(Ordering::Relaxed) => {
+                Err(plain(format!("{} didn't answer within {} seconds", nas.host(), MOUNT_TIMEOUT.as_secs())))
+            }
             Some(Err(_)) if asked.get() > 1 => Err(plain(format!("{} refused the saved user name or password", nas.host()))),
             Some(Err(e)) if e.matches(gio::IOErrorEnum::FailedHandled) && secrets::password(&nas.id).is_none() => {
                 Err(plain(format!("{} needs a password; add it in Share's settings", nas.host())))

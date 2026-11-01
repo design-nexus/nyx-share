@@ -267,3 +267,13 @@ window.share-window .app-group-title {
   margin: 16px 4px 8px 4px;
   font-weight: 600;
 }
+
+/* A job that is connecting has no progress yet: the bar breathes instead. */
+levelbar.connecting block.filled {
+  animation: share-connecting 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes share-connecting {
+  from { opacity: 0.2; }
+  to { opacity: 0.65; }
+}

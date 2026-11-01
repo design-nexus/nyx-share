@@ -847,7 +847,7 @@ impl App {
                     None => sub.set_text(&format!("Sending · {pct}{}", rate.unwrap_or_default())),
                 }
                 let bar = gtk::LevelBar::new();
-                bar.set_value(job.fraction().unwrap_or(0.0));
+                crate::outputs::set_progress(&bar, &job);
                 bar.set_margin_top(5);
                 text.append(&bar);
                 let cancel = widgets::icon_button("process-stop-symbolic", "Cancel");
@@ -1050,8 +1050,8 @@ impl App {
             }
             JobState::Completed if !j.outputs.is_empty() => {
                 let show = widgets::icon_button("folder-open-symbolic", "Show in folder");
-                let path = PathBuf::from(&j.outputs[0]);
-                show.connect_clicked(move |_| nyx_core::cmd::show_in_folder(&path));
+                let output = j.outputs[0].clone();
+                show.connect_clicked(move |_| crate::outputs::show(&output));
                 show.set_valign(gtk::Align::Center);
                 row.append(&show);
             }
@@ -1084,7 +1084,7 @@ impl App {
         right.append(&st);
         if !j.state.finished() {
             let bar = gtk::LevelBar::new();
-            bar.set_value(j.fraction().unwrap_or(0.0));
+            crate::outputs::set_progress(&bar, j);
             bar.set_size_request(80, -1);
             right.append(&bar);
         } else {
@@ -1261,9 +1261,13 @@ impl App {
                 }
             });
             remove.set_valign(gtk::Align::Center);
+            let trusted_label = widgets::label("Trusted", "dim");
+            trusted_label.set_valign(gtk::Align::Center);
+            trusted_label.set_tooltip_text(Some("Receive files from it without asking"));
+            controls.append(&trusted_label);
             controls.append(&trusted);
             controls.append(&remove);
-            let desc = format!("{presence} · {}{}", routes.join(" · "), if c.trusted { " · Trusted" } else { "" });
+            let desc = format!("{presence} · {}", routes.join(" · "));
             card.append(&widgets::row(&c.name, &desc, Some(controls.upcast_ref())));
         }
         let weak = Rc::downgrade(self);

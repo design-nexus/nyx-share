@@ -93,8 +93,9 @@ pins, hides and reorders, Ctrl+←/→ moves the focused destination, and Esc cl
 The installer registers a Nyx Files provider. After you reopen Files, a file's
 context menu has **Share…** (the Share Sheet for the selection) and, when a
 destination can take the selection without asking anything, **Send to… → Share →**
-that destination (today, **Copy** for a single image). Folders aren't offered
-yet. The registration is `~/.config/nyx-files/providers/nyx-share/`; delete it,
+that destination: your saved computers, NAS folders, nearby devices, and **Copy**
+for a single image. A send that is still running after a few seconds continues
+in the background and notifies when it finishes. Folders aren't offered yet. The registration is `~/.config/nyx-files/providers/nyx-share/`; delete it,
 or add an empty `disabled` file beside it, to turn this off.
 
 ## For app developers

@@ -7,7 +7,7 @@ use nyx_share_dbus::{
 use nyx_share_providers::{Payload, SendOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::OwnedFd;
@@ -155,7 +155,8 @@ impl Share1 {
         let options = parse_options(options)?;
         let send = send_options(&options, caller.sandboxed)?;
         let payloads = items::build(items::parse_specs(items)?, fds, &caller)?;
-        self.0.start(destination, Arc::new(payloads), send, options.notify.unwrap_or(true))
+        let quiet_for = Duration::from_secs(options.notify_after.unwrap_or(0).into());
+        self.0.start(destination, Arc::new(payloads), send, options.notify.unwrap_or(true), quiet_for)
     }
 
     fn list_destinations(&self, kinds: Vec<String>, count: u32) -> fdo::Result<String> {
@@ -262,7 +263,10 @@ impl Share1 {
         self.0.touch();
         let n = self.0.nearby().ok_or_else(|| fdo::Error::Failed("Turn on nearby sharing first".into()))?;
         let from = from.to_string();
-        let c = blocking_task(move || n.new_computer(&from)).await.map_err(fdo::Error::Failed)?;
+        let c = {
+            let _call = self.0.call();
+            blocking_task(move || n.new_computer(&from)).await.map_err(fdo::Error::Failed)?
+        };
         let mut list = nearby::load_computers();
         if let Some(existing) = list.iter().find(|x| x.fingerprint.eq_ignore_ascii_case(&c.fingerprint)) {
             return Err(fdo::Error::Failed(format!("{} is already saved as {}", c.name, existing.name)));
@@ -361,6 +365,7 @@ impl Share1 {
             .find(|n| n.id == id)
             .cloned()
             .ok_or_else(|| fdo::Error::UnknownObject("No such NAS folder".into()))?;
+        let _call = self.0.call();
         blocking_task(move || nyx_share_nas::test(&n)).await.map_err(fdo::Error::Failed)
     }
 
@@ -419,7 +424,7 @@ impl Sheet1 {
         // The folder comes from the user's own choice in the sheet, so a sandboxed origin doesn't matter here.
         let send = send_options(&options, false)?;
         let items = self.with(request, token, |r| Ok(r.items.clone()))?;
-        let id = self.0.start(destination, items, send, false)?;
+        let id = self.0.start(destination, items, send, false, Duration::ZERO)?;
         self.with(request, token, |r| {
             r.jobs.push(id.clone());
             Ok(())

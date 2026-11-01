@@ -183,6 +183,7 @@ fn build(app: &gtk::Application, conn: Arc<Conn>, info: RequestInfo) {
     window.present();
     sheet.focus_first();
     sheet.check_choices();
+    sheet.check_steps();
     // The window owns the sheet: this handler holds the only strong reference
     // and is dropped when the window is destroyed.
     window.connect_close_request(move |_| {
@@ -404,6 +405,68 @@ impl Sheet {
         }
     }
 
+    /// For checks: `NYX_SHARE_CHECK_STEPS=focus:save;up;menu:clipboard;pin:save` runs
+    /// one step every 1.5 s: focus a tile, move like the arrow keys (`up`, `down`,
+    /// `left`, `right`, through GTK's own cursor movement), open a tile's menu, or
+    /// run a menu action (`pin`, `hide`, `left`, `right`). Each step logs where
+    /// the focus is and the order of the tiles.
+    fn check_steps(self: &Rc<Self>) {
+        let Ok(steps) = std::env::var("NYX_SHARE_CHECK_STEPS") else { return };
+        let steps: Vec<String> = steps.split(';').filter(|s| !s.is_empty()).map(str::to_string).collect();
+        for (i, step) in steps.into_iter().enumerate() {
+            let weak = Rc::downgrade(self);
+            glib::timeout_add_local_once(std::time::Duration::from_millis(2000 + 1500 * i as u64), move || {
+                let Some(sheet) = weak.upgrade() else { return };
+                sheet.check_step(&step);
+                let focus = gtk::prelude::GtkWindowExt::focus(&sheet.window)
+                    .and_then(|w| w.downcast::<gtk::FlowBoxChild>().ok())
+                    .and_then(|c| c.parent().and_downcast::<gtk::FlowBox>().and_then(|f| sheet.id_of(&f, &c)));
+                let order: Vec<String> = sheet.flows.borrow().iter().map(|(_, ids)| ids.join(",")).collect();
+                eprintln!("check step {step}: focus={} tiles={}", focus.unwrap_or_default(), order.join(" | "));
+            });
+        }
+    }
+
+    fn check_step(self: &Rc<Self>, step: &str) {
+        let (name, id) = step.split_once(':').map_or((step, ""), |(n, id)| (n, id));
+        let tile = |id: &str| {
+            let flows = self.flows.borrow();
+            flows.iter().find_map(|(f, ids)| {
+                ids.iter().position(|x| x == id).and_then(|i| f.child_at_index(i as i32)).map(|c| (f.clone(), c))
+            })
+        };
+        let focused_flow = || {
+            gtk::prelude::GtkWindowExt::focus(&self.window)
+                .and_then(|w| w.downcast::<gtk::FlowBoxChild>().ok())
+                .and_then(|c| c.parent().and_downcast::<gtk::FlowBox>())
+        };
+        match (name, id) {
+            ("focus", id) => {
+                if let Some((_, child)) = tile(id) {
+                    child.grab_focus();
+                }
+            }
+            ("menu", id) => {
+                if let Some((flow, child)) = tile(id) {
+                    self.menu_for(&flow, &child);
+                }
+            }
+            ("up" | "down" | "left" | "right", "") => {
+                let Some(flow) = focused_flow() else { return };
+                let (step, count) = match name {
+                    "up" => (gtk::MovementStep::DisplayLines, -1),
+                    "down" => (gtk::MovementStep::DisplayLines, 1),
+                    "left" => (gtk::MovementStep::VisualPositions, -1),
+                    _ => (gtk::MovementStep::VisualPositions, 1),
+                };
+                flow.emit_move_cursor(step, count, false, false);
+            }
+            (action, id) => {
+                let _ = WidgetExt::activate_action(&self.window, &format!("dest.{action}"), Some(&id.to_variant()));
+            }
+        }
+    }
+
     fn destination(&self, id: &str) -> Option<Destination> {
         self.info.borrow().destinations.iter().find(|d| d.id == id).cloned()
     }
@@ -574,10 +637,20 @@ impl Sheet {
             send.append_item(&item("Send to a subfolder…", "subfolder"));
             menu.append_section(None, &send);
         }
+        let (can_left, can_right) = {
+            let flows = self.flows.borrow();
+            let ids = flows.iter().find(|(f, _)| f == flow).map(|(_, ids)| ids.as_slice()).unwrap_or_default();
+            let i = ids.iter().position(|x| *x == id);
+            (i.is_some_and(|i| i > 0), i.and_then(|i| ids.get(i + 1)).is_some_and(|next| next != MORE))
+        };
         let order = gio::Menu::new();
         order.append_item(&item(if d.pinned { "Unpin" } else { "Pin" }, "pin"));
-        order.append_item(&item("Move left", "left"));
-        order.append_item(&item("Move right", "right"));
+        if can_left {
+            order.append_item(&item("Move left", "left"));
+        }
+        if can_right {
+            order.append_item(&item("Move right", "right"));
+        }
         menu.append_section(None, &order);
         let visibility = gio::Menu::new();
         visibility.append_item(&item(if d.hidden { "Show" } else { "Hide" }, "hide"));
@@ -886,7 +959,7 @@ impl Sheet {
         row.title.set_text(&job_title(job, &d, &row.options));
         row.caption.set_text(&job_caption(job, row.started));
         row.caption.set_visible(!row.caption.text().is_empty());
-        row.bar.set_value(job.fraction().unwrap_or(0.0));
+        crate::outputs::set_progress(&row.bar, job);
         row.bar.set_visible(!job.state.finished());
         row.root.remove_css_class("failed");
         if job.state == JobState::Failed {
@@ -931,8 +1004,8 @@ impl Sheet {
             JobState::Completed => {
                 if let Some(first) = job.outputs.first() {
                     let show = widgets::icon_button("folder-open-symbolic", "Show in folder");
-                    let path = std::path::PathBuf::from(first);
-                    show.connect_clicked(move |_| nyx_core::cmd::show_in_folder(&path));
+                    let output = first.clone();
+                    show.connect_clicked(move |_| crate::outputs::show(&output));
                     row.actions.append(&show);
                 }
             }
@@ -1014,7 +1087,7 @@ fn job_caption(job: &Job, started: Instant) -> String {
     match job.state {
         JobState::Failed => job.message.clone().unwrap_or_default(),
         JobState::Completed => match job.outputs.as_slice() {
-            [one] => nyx_core::paths::pretty(std::path::Path::new(one)),
+            [one] => crate::outputs::pretty(one),
             _ => String::new(),
         },
         JobState::Cancelled => job.message.clone().filter(|m| m != "Cancelled").unwrap_or_default(),

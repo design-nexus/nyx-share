@@ -13,7 +13,7 @@ SFTP and NFS need no extra setup and share Files' connections:
 | --- | --- | --- |
 | `smb://host/share/folder` | `gvfsd-smb` | User, domain and password as saved; guest shares connect anonymously. |
 | `sftp://user@host[:port]/path` | `gvfsd-sftp` (ssh) | The host key must already be known (see below). |
-| `nfs://host/export/path` | `gvfsd-nfs` | Not yet tried against a real NFS server. |
+| `nfs://host/export/path` | `gvfsd-nfs` (libnfs, NFSv3) | Not working against the server tried so far (see below). |
 | `file:///path` | local | A mounted share, or any local folder. |
 
 Sending to a NAS folder:
@@ -21,7 +21,9 @@ Sending to a NAS folder:
 1. Mounts the share if it isn't, answering the password prompt from the saved
    credentials. A folder that doesn't exist yet is mounted through its nearest
    existing parent and then created.
-2. Tries the main address, then the Tailscale address if one is set.
+2. Tries the main address, then the Tailscale address if one is set. Each
+   attempt to connect may take up to two minutes; a server that doesn't answer
+   by then fails with "didn't answer within 120 seconds".
 3. Writes each item to a hidden partial file (`.name.<tag>.nyx-share-partial`),
    then moves it to the first free name without replacing anything: a taken
    name becomes `name (2).ext`, or, with **Skip files already there**, the item
@@ -79,7 +81,13 @@ without changing `known_hosts`, and adding a NAS folder from the Share app.
 - Mounting an SMB share can take 25 seconds or more on some servers, before
   the first byte is written; the sheet, the Share app and the CLI say
   "Connecting to …" meanwhile.
+- Share mounts a share but doesn't unmount it: after a send it stays mounted
+  in your session, as if you had opened it in Files (where you can eject it).
+  The next send starts at once.
 - **Test** writes and deletes a hidden `.nyx-share-check-…` file; a NAS with a
   recycle bin keeps it there.
-- NFS is untried.
+- NFS is unverified. Against an NFS-Ganesha server (NFSv3 and v4) libnfs,
+  which GVfs uses, couldn't even list the exports, and GVfs's mount hung;
+  Share now gives up after two minutes. A kernel NFS server or a NAS may
+  behave differently.
 - Folders can't be shared yet (like every destination).

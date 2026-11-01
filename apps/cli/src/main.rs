@@ -160,7 +160,7 @@ fn share(args: &[String]) -> Result<ExitCode, Error> {
         client.share(&content, &ShareOptions { app_name: Some("Terminal".into()), ..Default::default() })?;
         return Ok(ExitCode::SUCCESS);
     };
-    let options = ShareOptions { app_name: Some("Terminal".into()), folder, subfolder, notify: Some(!wait) };
+    let options = ShareOptions { app_name: Some("Terminal".into()), folder, subfolder, notify: Some(!wait), notify_after: None };
     let id = client.share_to(&to, &content, &options)?;
     if !wait {
         println!("{id}");

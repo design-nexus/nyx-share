@@ -4,6 +4,7 @@
 
 mod app;
 mod incoming;
+mod outputs;
 mod prefs;
 mod sheet;
 mod theme;

@@ -4,7 +4,7 @@ use nyx_share_dbus::{INTERFACE, PATH};
 use nyx_share_localsend::{Nearby, Offer};
 use nyx_share_providers::{Payload, Provider, SendError, SendOptions, Task};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zbus::fdo;
@@ -45,6 +45,9 @@ struct Entry {
     cancel: Arc<AtomicBool>,
     /// Notify when it finishes (false while a Share Sheet shows it).
     notify: bool,
+    /// ...but only if it took at least this long.
+    quiet_for: Duration,
+    started: Instant,
     last_emit: Instant,
 }
 
@@ -61,6 +64,18 @@ pub struct State {
     /// Bus names keeping the service running (open Share windows).
     pub holders: Mutex<std::collections::HashSet<String>>,
     last_activity: Mutex<Instant>,
+    /// Slow calls still being answered, such as TestNas.
+    calls: AtomicUsize,
+}
+
+/// Keeps the service from exiting idle while a slow call runs.
+pub struct Call<'a>(&'a State);
+
+impl Drop for Call<'_> {
+    fn drop(&mut self) {
+        self.0.calls.fetch_sub(1, Ordering::Relaxed);
+        self.0.touch();
+    }
 }
 
 /// Finished jobs kept for ListJobs.
@@ -105,7 +120,14 @@ impl State {
                 load_history()
                     .into_iter()
                     .rev()
-                    .map(|job| Entry { job, cancel: Arc::new(AtomicBool::new(false)), notify: false, last_emit: Instant::now() })
+                    .map(|job| Entry {
+                        job,
+                        cancel: Arc::new(AtomicBool::new(false)),
+                        notify: false,
+                        quiet_for: Duration::ZERO,
+                        started: Instant::now(),
+                        last_emit: Instant::now(),
+                    })
                     .collect(),
             ),
             bus: OnceLock::new(),
@@ -113,6 +135,7 @@ impl State {
             nas,
             holders: Mutex::new(std::collections::HashSet::new()),
             last_activity: Mutex::new(Instant::now()),
+            calls: AtomicUsize::new(0),
         }
     }
 
@@ -144,8 +167,15 @@ impl State {
         lock(&self.last_activity).elapsed()
     }
 
+    pub fn call(&self) -> Call<'_> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.touch();
+        Call(self)
+    }
+
     pub fn busy(&self) -> bool {
-        !lock(&self.requests).is_empty()
+        self.calls.load(Ordering::Relaxed) > 0
+            || !lock(&self.requests).is_empty()
             || lock(&self.incoming).values().any(|i| !i.dismissed || i.answer == Answer::Pending)
             || lock(&self.jobs).iter().any(|e| !e.job.state.finished())
             || self.nearby().is_some_and(|n| n.busy())
@@ -207,9 +237,10 @@ impl State {
         }
     }
 
-    fn add(&self, job: Job, cancel: Arc<AtomicBool>, notify: bool) {
+    fn add(&self, job: Job, cancel: Arc<AtomicBool>, notify: bool, quiet_for: Duration) {
         let mut jobs = lock(&self.jobs);
-        jobs.push(Entry { job, cancel, notify, last_emit: Instant::now() });
+        let now = Instant::now();
+        jobs.push(Entry { job, cancel, notify, quiet_for, started: now, last_emit: now });
         let mut excess = jobs.iter().filter(|e| e.job.state.finished()).count().saturating_sub(HISTORY);
         jobs.retain(|e| {
             let old = excess > 0 && e.job.state.finished();
@@ -243,7 +274,7 @@ impl State {
             if emit {
                 e.last_emit = Instant::now();
             }
-            (e.job.clone(), e.notify, emit)
+            (e.job.clone(), e.notify && e.started.elapsed() >= e.quiet_for, emit)
         };
         if emit {
             self.emit(&job);
@@ -258,6 +289,7 @@ impl State {
         items: Arc<Vec<Payload>>,
         options: SendOptions,
         notify: bool,
+        quiet_for: Duration,
     ) -> fdo::Result<String> {
         let (provider, dest) = self
             .providers()
@@ -298,7 +330,7 @@ impl State {
             updated: t,
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        self.add(job, cancel.clone(), notify);
+        self.add(job, cancel.clone(), notify, quiet_for);
         let state = self.clone();
         let (dest_id, job_id) = (dest.id.clone(), id.clone());
         std::thread::spawn(move || state.run(provider, &dest_id, &job_id, &items, &options, &cancel));
@@ -378,7 +410,7 @@ impl State {
             updated: t,
         };
         let watched = lock(&self.incoming).get(&offer.session).is_some_and(|i| !i.dismissed);
-        self.add(job.clone(), Arc::new(AtomicBool::new(false)), !watched);
+        self.add(job.clone(), Arc::new(AtomicBool::new(false)), !watched, Duration::ZERO);
         self.emit(&job);
         self.touch();
     }

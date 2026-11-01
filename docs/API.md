@@ -69,6 +69,8 @@ by index:
 - `subfolder`: for a NAS folder, a folder under it (`Reports/2026`), made if
   missing. No `.` or `..`.
 - `notify`: notify when a `ShareTo` job finishes (default `true`).
+- `notify_after`: with `notify`, only if the job took at least this many
+  seconds; for callers that show a quick result themselves.
 
 ## Destinations and jobs
 
@@ -141,7 +143,10 @@ s options) → s job`, `Dismiss(s, s)`. For offers from nearby devices:
 `DismissIncoming(s, s)` (declines an unanswered offer). The id and token reach
 the sheet in `NYX_SHARE_REQUEST` or `NYX_SHARE_INCOMING`, and `NYX_SHARE_TOKEN`.
 For checks, `NYX_SHARE_CHECK_CHOOSE` (`save:/path;clipboard;nas:<id>>Sub/Folder`)
-makes the sheet choose destinations as if clicked, and `NYX_SHARE_CHECK_ANSWER`
+makes the sheet choose destinations as if clicked, `NYX_SHARE_CHECK_STEPS`
+(`focus:save;up;menu:clipboard;pin:save`) focuses tiles, moves like the arrow
+keys, opens a tile's menu and runs its actions, one step every 1.5 s, logging
+the focus and the order of the tiles, and `NYX_SHARE_CHECK_ANSWER`
 (`accept` or `decline`) answers an offer after two seconds. In the Share window,
 `NYX_SHARE_CHECK_ADD` (`/a:/b`) fills the tray, `NYX_SHARE_CHECK_PAGE`
 (`transfers`, `settings` or `add-nas`) opens a page or the Add a NAS folder

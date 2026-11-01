@@ -138,10 +138,15 @@ fn activate(paths: &[String], action: &str, context: &str, client: &mut Option<C
             Err(e) => rejected(total, &e.to_string()),
         };
     };
-    let job = match client.share_to(destination, &content, &ShareOptions { notify: Some(false), ..options }) {
-        Ok(id) => id,
-        Err(e) => return rejected(paths.len(), &e.to_string()),
-    };
+    // Files shows a quick result itself and doesn't follow a job, so the service
+    // notifies only for one still running when this reply goes back. A second
+    // short of QUICK: a job ending right at the edge notifies twice, never zero times.
+    let quiet_for = Some(QUICK.as_secs().saturating_sub(1) as u32);
+    let job =
+        match client.share_to(destination, &content, &ShareOptions { notify: Some(true), notify_after: quiet_for, ..options }) {
+            Ok(id) => id,
+            Err(e) => return rejected(paths.len(), &e.to_string()),
+        };
     let started = Instant::now();
     let finished = loop {
         match client.job(&job) {

@@ -266,6 +266,10 @@ pub struct ShareOptions {
     /// Notify when the job finishes (default true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notify: Option<bool>,
+    /// With `notify`: only if the job takes at least this many seconds, for a
+    /// caller that reports quick results itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notify_after: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
