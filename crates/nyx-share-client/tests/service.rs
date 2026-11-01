@@ -170,9 +170,15 @@ fn refuses_unsafe_descriptors() {
     content.open_file(writable, ContentKind::File, Some("file.txt".into()), None);
     refused(client.share_to("save", &content, &options), "read-only");
 
+    let fifo = std::ffi::CString::new(dir.join("pipe").display().to_string()).unwrap();
+    // SAFETY: a valid path; the descriptor is handed to File.
+    let pipe = unsafe {
+        libc::mkfifo(fifo.as_ptr(), 0o600);
+        File::from_raw_fd(libc::open(fifo.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC))
+    };
     let mut content = Content::new();
-    content.open_file(File::open(&dir).unwrap(), ContentKind::File, None, None);
-    refused(client.share_to("save", &content, &options), "folder");
+    content.open_file(pipe, ContentKind::File, None, None);
+    refused(client.share_to("save", &content, &options), "regular file");
 
     let c = std::ffi::CString::new(path.display().to_string()).unwrap();
     // SAFETY: a valid path; the descriptor is handed to File.
@@ -181,7 +187,7 @@ fn refuses_unsafe_descriptors() {
     content.open_file(o_path, ContentKind::File, None, None);
     refused(client.share_to("save", &content, &options), "O_PATH");
 
-    assert!(matches!(Content::new().file(&dir), Err(Error::Refused(_))));
+    assert!(matches!(Content::new().file("/dev/null"), Err(Error::Refused(_))));
 }
 
 #[test]
@@ -411,4 +417,52 @@ fn linked_devices_fall_back_to_the_next_route() {
     client.remove_device(&id).unwrap();
     assert!(client.destinations(&[], 0).unwrap().iter().any(|d| d.id == "flux:p1"));
     assert!(!std::fs::read_to_string(service().root.join("config/nyx-share/devices.toml")).unwrap().contains("flux:p1"));
+}
+
+#[test]
+#[ignore]
+fn shares_a_folder_without_following_links() {
+    let client = Client::connect().unwrap();
+    let src = scratch("folder-src");
+    let trip = src.join("Trip");
+    std::fs::create_dir_all(trip.join("day 1")).unwrap();
+    std::fs::create_dir_all(trip.join("empty")).unwrap();
+    std::fs::write(trip.join("a.txt"), "a").unwrap();
+    std::fs::write(trip.join("day 1/b.txt"), "b").unwrap();
+    std::fs::write(trip.join(".hidden"), "h").unwrap();
+    std::fs::write(src.join("secret"), "s").unwrap();
+    std::os::unix::fs::symlink(src.join("secret"), trip.join("link.txt")).unwrap();
+    std::os::unix::fs::symlink(&src, trip.join("up")).unwrap();
+    let target = scratch("folder-out");
+
+    let mut content = Content::new();
+    content.file(&trip).unwrap();
+    let options = ShareOptions { folder: Some(target.display().to_string()), notify: Some(false), ..Default::default() };
+    let id = client.share_to("save", &content, &options).unwrap();
+    let done = client.wait(&id, |_| {}).unwrap();
+    assert_eq!(done.state, JobState::Completed, "{:?}", done.message);
+    assert_eq!(done.message.as_deref(), Some("Saved Trip to folder-out"));
+    assert_eq!(std::fs::read_to_string(target.join("Trip/a.txt")).unwrap(), "a");
+    assert_eq!(std::fs::read_to_string(target.join("Trip/day 1/b.txt")).unwrap(), "b");
+    let mut saved: Vec<String> = walk(&target.join("Trip"));
+    saved.sort();
+    assert_eq!(saved, ["a.txt", "day 1/b.txt"], "no hidden files, links or empty folders");
+
+    let empty = scratch("folder-empty");
+    let mut content = Content::new();
+    content.file(&empty).unwrap();
+    refused(client.share_to("save", &content, &options), "no files to share");
+}
+
+fn walk(dir: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if e.file_type().unwrap().is_dir() {
+            out.extend(walk(&e.path()).into_iter().map(|n| format!("{name}/{n}")));
+        } else {
+            out.push(name);
+        }
+    }
+    out
 }

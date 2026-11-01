@@ -189,10 +189,16 @@ impl Provider for Cloud {
         let (remote, base) = self.mounted(&bus, id, task)?;
         let dir = subfolder(&base, task.options.subfolder.as_deref())?;
         let mut outputs = Vec::new();
+        let mut tree = nyx_share_providers::Tree::new(&dir);
         for item in task.items {
             if task.cancelled() {
                 return Err(SendError::Cancelled { outputs });
             }
+            let dir = match tree.dir(&nyx_share_providers::folder_of(item)) {
+                Ok(dir) => dir,
+                Err(SendError::Failed { message, .. }) => return Err(SendError::Failed { message, outputs }),
+                Err(e) => return Err(e),
+            };
             let saved = match &item.data {
                 Data::Text(text) => {
                     let name = names::for_text(Some(&item.info.name));
@@ -217,9 +223,10 @@ impl Provider for Cloud {
                 Err(SendError::Failed { message, .. }) => return Err(SendError::Failed { message, outputs }),
             }
         }
-        let (what, it) = match outputs.len() {
-            1 => (Path::new(&outputs[0]).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "it"),
-            n => (format!("{n} items"), "them"),
+        let (what, it) = match (tree.only(task.items), outputs.len()) {
+            (Some(made), _) => (made, "it"),
+            (None, 1) => (Path::new(&outputs[0]).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), "it"),
+            (None, n) => (format!("{n} items"), "them"),
         };
         Ok(Outcome { message: format!("Copied {what} to {}; Cloud uploads {it} in the background", remote.name), outputs })
     }

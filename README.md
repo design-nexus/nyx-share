@@ -105,7 +105,7 @@ context menu has **Share…** (the Share Sheet for the selection) and, when a
 destination can take the selection without asking anything, **Send to… → Share →**
 that destination: your saved computers, NAS folders, nearby devices, and **Copy**
 for a single image. A send that is still running after a few seconds continues
-in the background and notifies when it finishes. Folders aren't offered yet. The registration is `~/.config/nyx-files/providers/nyx-share/`; delete it,
+in the background and notifies when it finishes. A folder is shared as its files. The registration is `~/.config/nyx-files/providers/nyx-share/`; delete it,
 or add an empty `disabled` file beside it, to turn this off.
 
 ## In the Nyx apps

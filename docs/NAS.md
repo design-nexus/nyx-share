@@ -90,4 +90,6 @@ without changing `known_hosts`, and adding a NAS folder from the Share app.
   which GVfs uses, couldn't even list the exports, and GVfs's mount hung;
   Share now gives up after two minutes. A kernel NFS server or a NAS may
   behave differently.
-- Folders can't be shared yet (like every destination).
+- A shared folder is copied as a new folder ("Trip (2)" if "Trip" is there);
+  with "skip files already there" it goes into the existing one and skips
+  files of the same name, so sending a folder again copies only what's new.

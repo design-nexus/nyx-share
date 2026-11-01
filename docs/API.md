@@ -57,13 +57,21 @@ by index:
 - `kind`: `text`, `url`, `image` or `file`.
 - Text and links carry `text` (at most 1 MiB). Links must use `http`, `https`,
   `mailto`, `tel`, `sms`, `geo`, `magnet`, `ftp`, `sftp`, `smb` or `nfs`.
-- Images and files carry `fd`: a regular file opened **read-only**, not
-  `O_PATH`. Every descriptor sent must be used exactly once. `name` and `mime`
+- Images and files carry `fd`: a regular file or a folder opened
+  **read-only**, not `O_PATH`. Every descriptor sent must be used exactly once. `name` and `mime`
   are optional; names are reduced to a safe file name before use.
 - Unsandboxed callers may send `path` (absolute) instead of `fd`. Sandboxed
   callers (Flatpak, Snap, or a caller whose process can't be identified) must
   send descriptors.
-- At most 200 items. Folders aren't accepted yet.
+- A folder is shared as its files and subfolders, at most 16 deep. Hidden
+  entries, links and special files are left out, and links are never followed.
+  Each file's `ItemInfo` gets `folder`, where it sits from the shared folder's
+  own name down (`"Trip/day 1"`). Save to folder, NAS, Cloud, saved computers
+  and LocalSend devices rebuild the layout as a new folder ("Trip", or
+  "Trip (2)" if that's taken; a NAS set to skip files already there goes into
+  the existing one). Flux, Bluetooth, Mail and the clipboard get the files on
+  their own. A folder with no files is refused.
+- At most 200 items, and 1000 files once folders are opened up.
 
 ## Options
 
@@ -132,7 +140,7 @@ let job = client.share_to("clipboard", &content, &Default::default())?;
 let done = client.wait(&job, |_| {})?;
 ```
 
-`Content::file(path)` opens a file read-only; `Content::bytes(kind, name, mime,
+`Content::file(path)` opens a file or a folder read-only; `Content::bytes(kind, name, mime,
 bytes)` shares something that exists only in memory (an edited picture, an
 exported page) through a private file removed at once. `Client::events()` yields
 `JobChanged` and `DestinationsChanged` as they happen.

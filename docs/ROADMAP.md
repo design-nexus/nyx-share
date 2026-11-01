@@ -20,12 +20,8 @@
 
 Still open:
 
-- Settings → Sharing doesn't yet have the spec's Transfers section (active,
-  recent and failed transfers, retry, history retention), turning whole
-  providers on and off, or default providers; the Share app has Transfers.
 - Nyx Assistant as a destination (it needs a way to receive content), and SMS
   through Flux.
-- Folder sharing, for every destination.
-- One entry for a phone seen through both Flux and LocalSend or Bluetooth,
-  linked by the user.
+- Choosing a folder from the Share window's add button (folders can be
+  dropped on it, or shared from apps, Files and the command line).
 - A freedesktop sharing portal, as an upstream proposal ([PORTAL.md](PORTAL.md)).

@@ -72,6 +72,7 @@ fn send(ext: &External, id: &str, file: &Path, cancel_after: Option<std::time::D
             mime: None,
             size: std::fs::metadata(file).unwrap().len(),
             preview: None,
+            folder: None,
         },
         data: Data::File(std::fs::File::open(file).unwrap()),
     }];

@@ -78,6 +78,10 @@ pub struct ItemInfo {
     /// The start of a text or a link, for the preview.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<String>,
+    /// For a file from a shared folder, the folders it sits in, from the shared
+    /// folder's own name down: "Trip/day 1".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug)]

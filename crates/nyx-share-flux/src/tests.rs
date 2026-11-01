@@ -85,7 +85,7 @@ fn serve(dir: &Path, fake: Arc<StdMutex<Fake>>) -> PathBuf {
 
 fn text(kind: ContentKind, s: &str) -> Payload {
     Payload {
-        info: ItemInfo { kind, name: "Shared text".into(), mime: None, size: s.len() as u64, preview: None },
+        info: ItemInfo { kind, name: "Shared text".into(), mime: None, size: s.len() as u64, preview: None, folder: None },
         data: Data::Text(s.into()),
     }
 }
@@ -94,7 +94,14 @@ fn file(dir: &Path, name: &str, bytes: &[u8]) -> Payload {
     let path = dir.join(format!("src-{}", uuid::Uuid::new_v4().simple()));
     std::fs::write(&path, bytes).unwrap();
     Payload {
-        info: ItemInfo { kind: ContentKind::File, name: name.into(), mime: None, size: bytes.len() as u64, preview: None },
+        info: ItemInfo {
+            kind: ContentKind::File,
+            name: name.into(),
+            mime: None,
+            size: bytes.len() as u64,
+            preview: None,
+            folder: None,
+        },
         data: Data::File(std::fs::File::open(&path).unwrap()),
     }
 }

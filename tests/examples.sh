@@ -50,7 +50,7 @@ if command -v cc >/dev/null && pkg-config --exists gio-unix-2.0 json-glib-1.0; t
     got=$(request)
     [[ $got == 'plain.txt' ]] || fail "share.c: $got"
     echo "ok: share.c opened the sheet for: $got"
-    if "$tmp/share" "$tmp" 2> "$tmp/err"; then fail "share.c accepted a folder"; fi
+    if "$tmp/share" /dev/null 2> "$tmp/err"; then fail "share.c accepted a device"; fi
     grep -q "Couldn't share" "$tmp/err" || fail "share.c: $(cat "$tmp/err")"
     echo "ok: share.c reports the service's refusal: $(cat "$tmp/err")"
 else

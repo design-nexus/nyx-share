@@ -16,8 +16,13 @@ remote device without explicit trust (from Phase 3).
   or Snap cgroup, or can't be identified at all.
 - **Sandboxed callers** must pass files as descriptors (no paths) and can't
   choose a Save to folder target; they use `Share`, where the user picks.
-- **Descriptors** must be regular files opened read-only and not `O_PATH`;
-  folders, sockets, pipes and devices are refused. Each sent descriptor must be
+- **Descriptors** must be regular files or folders opened read-only and not
+  `O_PATH`; sockets, pipes and devices are refused. A folder is read through
+  its descriptor: each entry is opened relative to its folder's descriptor with
+  `O_NOFOLLOW`, links and special files are skipped, and the walk stops at 16
+  levels and 1000 files. So a link inside a shared folder can't reach anything
+  the caller couldn't read. Folders written for it are new ones the service
+  made, so nothing is written through an existing link either. Each sent descriptor must be
   used by exactly one item.
 - **Content limits.** At most 200 items, 1 MiB of text per item, links limited
   to a list of schemes (no `file:`, `data:` or `javascript:`), content types

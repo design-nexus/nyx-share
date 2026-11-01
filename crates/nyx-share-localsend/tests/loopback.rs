@@ -201,3 +201,24 @@ fn refuses_a_device_claiming_another_key() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn keeps_a_shared_folders_layout_inside_the_inbox() {
+    let p = pair("folder", true);
+    std::fs::create_dir(p.root.join("inbox/Trip")).unwrap();
+    let file = |name: &str, bytes: &'static [u8]| Outgoing {
+        name: name.into(),
+        size: bytes.len() as u64,
+        mime: "text/plain".into(),
+        preview: None,
+        source: Source::Bytes(bytes),
+    };
+    let files = [file("Trip/day 1/a.txt", b"a"), file("Trip/b.txt", b"b"), file("../../Trip/../.x/c.txt", b"c")];
+    assert_eq!(p.send(&p.receiver_fp, &files), Ok(3));
+    let inbox = p.root.join("inbox");
+    assert!(std::fs::read_dir(inbox.join("Trip")).unwrap().next().is_none(), "the folder that was there is left alone");
+    assert_eq!(std::fs::read(inbox.join("Trip (2)/day 1/a.txt")).unwrap(), b"a");
+    assert_eq!(std::fs::read(inbox.join("Trip (2)/b.txt")).unwrap(), b"b");
+    assert_eq!(std::fs::read(inbox.join("Trip (2)/x/c.txt")).unwrap(), b"c");
+    assert!(!p.root.join("x").exists());
+}

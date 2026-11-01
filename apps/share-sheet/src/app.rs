@@ -29,6 +29,7 @@ impl Chosen {
         match self {
             Chosen::Text(t) if t.trim().starts_with("http://") || t.trim().starts_with("https://") => ContentKind::Url,
             Chosen::Text(_) => ContentKind::Text,
+            Chosen::File(p) if p.is_dir() => ContentKind::File,
             Chosen::File(p) => {
                 let image = p
                     .file_name()
@@ -582,7 +583,7 @@ impl App {
 
     fn add_files(self: &Rc<Self>, paths: Vec<PathBuf>) {
         let mut items = self.items.borrow_mut();
-        for p in paths.into_iter().filter(|p| p.is_file()) {
+        for p in paths.into_iter().filter(|p| p.is_file() || p.is_dir()) {
             if !items.iter().any(|i| matches!(i, Chosen::File(q) if *q == p)) {
                 items.push(Chosen::File(p));
             }
@@ -653,6 +654,7 @@ impl App {
             frame.set_overflow(gtk::Overflow::Hidden);
             let gicon: gio::Icon = match (item, item.kind()) {
                 (_, ContentKind::Url) => gio::ThemedIcon::new("web-browser-symbolic").upcast(),
+                (Chosen::File(p), _) if p.is_dir() => gio::ThemedIcon::new("folder-symbolic").upcast(),
                 (Chosen::File(p), _) => {
                     let mime =
                         p.file_name().and_then(|n| nyx_share_core::mime::guess(&n.to_string_lossy())).unwrap_or("text/plain");
@@ -679,8 +681,12 @@ impl App {
         t.set_xalign(0.0);
         t.set_ellipsize(gtk::pango::EllipsizeMode::End);
         t.set_max_width_chars(36);
-        let size: u64 =
-            items.iter().filter_map(|i| if let Chosen::File(p) = i { p.metadata().ok().map(|m| m.len()) } else { None }).sum();
+        let size: u64 = items
+            .iter()
+            .filter_map(
+                |i| if let Chosen::File(p) = i { p.metadata().ok().filter(|m| m.is_file()).map(|m| m.len()) } else { None },
+            )
+            .sum();
         let count = if items.len() == 1 { "1 item".to_string() } else { format!("{} items", items.len()) };
         let sub = if size > 0 { format!("{count} · {}", units::size(size)) } else { count };
         let s = widgets::label(&sub, "preview-subtitle");

@@ -15,6 +15,19 @@ pub fn sanitize(name: &str) -> String {
     truncate(trimmed, 255)
 }
 
+/// The safe folder names in a relative path ("Trip/day 1"): empty and dot-only
+/// parts are dropped, so nothing climbs out; at most 16 levels.
+pub fn folder_parts(path: &str) -> Vec<String> {
+    path.split(['/', '\\']).filter(|p| !p.trim().trim_matches('.').is_empty()).map(sanitize).take(16).collect()
+}
+
+/// A received name that may carry folders ("Trip/day 1/a.jpg"): the safe
+/// folders and the safe file name.
+pub fn relative(name: &str) -> (Vec<String>, String) {
+    let (dirs, file) = name.rsplit_once(['/', '\\']).unwrap_or(("", name));
+    (folder_parts(dirs), sanitize(file))
+}
+
 /// Shorten to `max` bytes on a character boundary, keeping a short extension.
 fn truncate(name: &str, max: usize) -> String {
     if name.len() <= max {
@@ -120,6 +133,14 @@ mod tests {
     fn partial_names_are_hidden_and_bounded() {
         assert_eq!(partial("a.txt", "1f"), ".a.txt.1f.nyx-share-partial");
         assert!(partial(&"x".repeat(255), "ffffffffffffffff").len() < 255);
+    }
+
+    #[test]
+    fn keeps_folders_inside() {
+        assert_eq!(folder_parts("Trip/day 1"), ["Trip", "day 1"]);
+        assert_eq!(folder_parts("../../etc/./"), ["etc"]);
+        assert_eq!(relative("Trip/../.ssh/id"), (vec!["Trip".to_string(), "ssh".to_string()], "id".to_string()));
+        assert_eq!(relative("a.jpg"), (vec![], "a.jpg".to_string()));
     }
 
     #[test]

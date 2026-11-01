@@ -140,12 +140,15 @@ impl Content {
         self
     }
 
-    /// Add a regular file. Images are recognised by their extension.
+    /// Add a regular file, or a folder: the service shares the files in it and
+    /// its subfolders (not hidden ones or links), keeping the layout where the
+    /// destination can. Images are recognised by their extension.
     pub fn file(&mut self, path: impl AsRef<Path>) -> Result<&mut Self, Error> {
         let path = path.as_ref();
         let file = File::open(path)?;
-        if !file.metadata()?.is_file() {
-            return Err(Error::Refused(format!("{} isn't a file. Folders can't be shared yet.", path.display())));
+        let meta = file.metadata()?;
+        if !meta.is_file() && !meta.is_dir() {
+            return Err(Error::Refused(format!("{} isn't a file or a folder", path.display())));
         }
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
         let mime = name.as_deref().and_then(nyx_share_core::mime::guess).map(str::to_string);

@@ -68,7 +68,8 @@ struct Session {
     offer: Offer,
     tokens: HashMap<String, String>,
     remaining: Vec<String>,
-    folder: PathBuf,
+    /// The receive folder, and the folders made in it for a shared folder's files.
+    tree: nyx_share_providers::Tree,
     cancel: Arc<AtomicBool>,
     last: Instant,
     failed: Option<String>,
@@ -263,7 +264,9 @@ impl Receiver {
         let mut files: Vec<FileDto> = request.files.into_values().collect();
         files.sort_by(|a, b| a.file_name.cmp(&b.file_name));
         for f in &mut files {
-            f.file_name = names::sanitize(&f.file_name);
+            // "Trip/day 1/a.jpg" from a shared folder: safe parts only.
+            let (dirs, name) = names::relative(&f.file_name);
+            f.file_name = dirs.into_iter().chain([name]).collect::<Vec<_>>().join("/");
         }
         let total = files.iter().map(|f| f.size).sum();
         let message_only = files.iter().all(|f| f.file_type.starts_with("text/") && f.preview.is_some());
@@ -301,7 +304,7 @@ impl Receiver {
             remaining: offer.files.iter().map(|f| f.id.clone()).collect(),
             offer,
             tokens,
-            folder,
+            tree: nyx_share_providers::Tree::new(&folder),
             cancel: Arc::new(AtomicBool::new(false)),
             last: Instant::now(),
             failed: None,
@@ -323,7 +326,9 @@ impl Receiver {
             }
             session.last = Instant::now();
             let file = session.offer.files.iter().find(|f| f.id == file_id).cloned().expect("listed");
-            (file, session.folder.clone(), session.cancel.clone())
+            let (dirs, _) = names::relative(&file.file_name);
+            let Ok(folder) = session.tree.dir(&dirs) else { return 500 };
+            (file, folder, session.cancel.clone())
         };
         if head.content_length().is_some_and(|n| n != file.size) {
             return 400;
@@ -331,7 +336,7 @@ impl Receiver {
         let mut hasher = file.sha256.as_ref().map(|_| Sha256::new());
         let mut body = Hashing { inner: http::body(reader, head), hasher: hasher.as_mut() };
         let progress = |n: u64| self.host.progress(&session_id, n);
-        let saved = save_stream(&folder, &file.file_name, &mut body, file.size, &cancel, &progress);
+        let saved = save_stream(&folder, &names::relative(&file.file_name).1, &mut body, file.size, &cancel, &progress);
         let mut status = 200;
         let mut finished = None;
         {

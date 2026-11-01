@@ -340,6 +340,7 @@ fn copy_into(nas: &Nas, sub: &[String], task: &Task<'_>, cancellable: &gio::Canc
     };
     let mut outputs = Vec::new();
     let mut skipped = 0;
+    let mut tops: std::collections::HashMap<String, gio::File> = std::collections::HashMap::new();
     for item in task.items {
         if task.cancelled() {
             return Err(SendError::Cancelled { outputs });
@@ -348,12 +349,21 @@ fn copy_into(nas: &Nas, sub: &[String], task: &Task<'_>, cancellable: &gio::Canc
             ContentKind::Text | ContentKind::Url => names::for_text(Some(&item.info.name)),
             _ => names::sanitize(&item.info.name),
         };
-        if nas.conflict == Conflict::Skip && folder.child(&name).query_exists(Some(cancellable)) {
+        let target = match subdir(&folder, &nyx_share_providers::folder_of(item), &mut tops, nas.conflict, cancellable) {
+            Ok(dir) => dir,
+            Err(e) => {
+                return Err(SendError::Failed {
+                    message: format!("Couldn't make a folder on the NAS: {}", e.message()),
+                    outputs,
+                });
+            }
+        };
+        if nas.conflict == Conflict::Skip && target.child(&name).query_exists(Some(cancellable)) {
             skipped += 1;
             (task.progress)(item.size());
             continue;
         }
-        match put(&folder, &name, item, task, cancellable) {
+        match put(&target, &name, item, task, cancellable) {
             Ok(uri) => outputs.push(uri),
             Err(SendError::Cancelled { .. }) => return Err(SendError::Cancelled { outputs }),
             Err(SendError::Failed { message, .. }) => {
@@ -369,13 +379,55 @@ fn copy_into(nas: &Nas, sub: &[String], task: &Task<'_>, cancellable: &gio::Canc
         [] => nas.name.clone(),
         _ => format!("{} / {}", nas.name, sub.join("/")),
     };
+    let only = nyx_share_providers::shared_folder(task.items).and_then(|top| tops.get(&top).and_then(|f| f.basename()));
     let message = match (outputs.len(), skipped) {
         (0, s) if s > 0 => format!("Nothing copied: {s} already in {place}"),
+        (_, 0) if only.is_some() => format!("Copied {} to {place}", only.unwrap().to_string_lossy()),
         (1, 0) => format!("Copied {name} to {place}", name = item_name(&outputs[0])),
         (n, 0) => format!("Copied {n} items to {place}"),
         (n, s) => format!("Copied {n} items to {place}; {s} already there"),
     };
     Ok(Outcome { message, outputs })
+}
+
+/// The folder on the NAS for a file from a shared folder. The shared folder
+/// gets a new folder ("Trip (2)" if "Trip" is taken), or with "skip files
+/// already there" goes into the one of that name.
+fn subdir(
+    base: &gio::File,
+    parts: &[String],
+    tops: &mut std::collections::HashMap<String, gio::File>,
+    conflict: Conflict,
+    cancellable: &gio::Cancellable,
+) -> Result<gio::File, glib::Error> {
+    let Some((top, rest)) = parts.split_first() else { return Ok(base.clone()) };
+    let exists = |e: &glib::Error| e.matches(gio::IOErrorEnum::Exists);
+    let mut dir = match tops.get(top) {
+        Some(made) => made.clone(),
+        None => {
+            let mut n = 1;
+            let made = loop {
+                let dir = base.child(if n == 1 { top.clone() } else { format!("{top} ({n})") });
+                match dir.make_directory(Some(cancellable)) {
+                    Ok(()) => break dir,
+                    Err(e) if exists(&e) && conflict == Conflict::Skip => break dir,
+                    Err(e) if exists(&e) && n < 10_000 => n += 1,
+                    Err(e) => return Err(e),
+                }
+            };
+            tops.insert(top.clone(), made.clone());
+            made
+        }
+    };
+    for part in rest {
+        dir = dir.child(part);
+        match dir.make_directory(Some(cancellable)) {
+            Ok(()) => {}
+            Err(e) if exists(&e) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(dir)
 }
 
 /// All of `bytes`, or the error (a short write counts as one).

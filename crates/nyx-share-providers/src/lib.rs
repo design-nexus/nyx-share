@@ -8,7 +8,7 @@ pub mod qr;
 pub mod stage;
 
 pub use clipboard::Clipboard;
-pub use folder::{Folder, free_bytes, save_stream};
+pub use folder::{Folder, Tree, free_bytes, save_stream};
 
 use nyx_share_core::{ContentKind, Destination, ItemInfo};
 use std::fs::File;
@@ -125,4 +125,16 @@ pub(crate) fn write_error(e: &std::io::Error) -> String {
         Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS) => "That folder can't be written to".into(),
         _ => format!("Couldn't write the file: {e}"),
     }
+}
+
+/// The safe folders a payload from a shared folder sits in; empty otherwise.
+pub fn folder_of(item: &Payload) -> Vec<String> {
+    item.info.folder.as_deref().map(nyx_share_core::names::folder_parts).unwrap_or_default()
+}
+
+/// The shared folder's name when every item comes from the same one.
+pub fn shared_folder(items: &[Payload]) -> Option<String> {
+    let mut tops = items.iter().map(|i| folder_of(i).into_iter().next());
+    let first = tops.next()??;
+    tops.all(|t| t.as_deref() == Some(first.as_str())).then_some(first)
 }

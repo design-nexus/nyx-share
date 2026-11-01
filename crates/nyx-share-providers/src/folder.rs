@@ -1,5 +1,6 @@
 use crate::{Data, Outcome, Payload, Provider, SendError, Task, write_error};
 use nyx_share_core::{ContentKind, Destination, Section, names, units};
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -59,12 +60,13 @@ impl Provider for Folder {
             )));
         }
         let mut outputs = Vec::new();
+        let mut tree = Tree::new(folder);
         for item in task.items {
             let name = match item.info.kind {
                 ContentKind::Text | ContentKind::Url => names::for_text(Some(&item.info.name)),
                 _ => names::sanitize(&item.info.name),
             };
-            match save(folder, &name, item, task) {
+            match tree.dir(&crate::folder_of(item)).and_then(|dir| save(&dir, &name, item, task)) {
                 Ok(path) => outputs.push(path.display().to_string()),
                 Err(SendError::Cancelled { .. }) => return Err(SendError::Cancelled { outputs }),
                 Err(SendError::Failed { message, .. }) => {
@@ -76,12 +78,68 @@ impl Provider for Folder {
                 }
             }
         }
-        let message = match outputs.as_slice() {
-            [one] => format!("Saved {} to {place}", Path::new(one).file_name().unwrap_or_default().to_string_lossy()),
-            many => format!("Saved {} items to {place}", many.len()),
+        let message = match (tree.only(task.items), outputs.as_slice()) {
+            (Some(made), _) => format!("Saved {made} to {place}"),
+            (None, [one]) => format!("Saved {} to {place}", Path::new(one).file_name().unwrap_or_default().to_string_lossy()),
+            (None, many) => format!("Saved {} items to {place}", many.len()),
         };
         Ok(Outcome { message, outputs })
     }
+}
+
+/// Where a share's files go inside `base`: each shared folder gets a new folder
+/// of its own ("Trip", or "Trip (2)" if that is taken), its subfolders inside.
+/// Nothing that was there before is written into, so no link is followed.
+pub struct Tree {
+    base: PathBuf,
+    tops: HashMap<String, PathBuf>,
+}
+
+impl Tree {
+    pub fn new(base: &Path) -> Self {
+        Self { base: base.to_path_buf(), tops: HashMap::new() }
+    }
+
+    /// The folder for a file in `parts` (from [`crate::folder_of`]), made if needed.
+    pub fn dir(&mut self, parts: &[String]) -> Result<PathBuf, SendError> {
+        let Some((top, rest)) = parts.split_first() else { return Ok(self.base.clone()) };
+        let mut dir = match self.tops.get(top) {
+            Some(made) => made.clone(),
+            None => {
+                let made = fresh_dir(&self.base, top)?;
+                self.tops.insert(top.clone(), made.clone());
+                made
+            }
+        };
+        for part in rest {
+            dir.push(part);
+            match std::fs::create_dir(&dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && dir.symlink_metadata().is_ok_and(|m| m.is_dir()) => {}
+                Err(e) => return Err(SendError::failed(write_error(&e))),
+            }
+        }
+        Ok(dir)
+    }
+
+    /// The folder's name as saved, when the share was one folder and nothing else.
+    pub fn only(&self, items: &[Payload]) -> Option<String> {
+        let top = crate::shared_folder(items)?;
+        self.tops.get(&top).and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned())
+    }
+}
+
+/// Make `name` in `dir`, or "name (2)" and so on if it is taken.
+fn fresh_dir(dir: &Path, name: &str) -> Result<PathBuf, SendError> {
+    for n in 1..10_000 {
+        let candidate = dir.join(if n == 1 { name.to_string() } else { format!("{name} ({n})") });
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(SendError::failed(write_error(&e))),
+        }
+    }
+    Err(SendError::failed(format!("Too many folders are already named {name}")))
 }
 
 fn free_space(dir: &Path) -> Option<u64> {
@@ -235,7 +293,7 @@ mod tests {
     fn file_item(src: &Path, name: &str) -> Payload {
         let size = std::fs::metadata(src).unwrap().len();
         Payload {
-            info: ItemInfo { kind: ContentKind::File, name: name.into(), mime: None, size, preview: None },
+            info: ItemInfo { kind: ContentKind::File, name: name.into(), mime: None, size, preview: None, folder: None },
             data: Data::File(File::open(src).unwrap()),
         }
     }
@@ -283,7 +341,14 @@ mod tests {
     fn saves_text_and_cleans_up_when_cancelled() {
         let dir = scratch("text");
         let text = Payload {
-            info: ItemInfo { kind: ContentKind::Text, name: "Shared text".into(), mime: None, size: 5, preview: None },
+            info: ItemInfo {
+                kind: ContentKind::Text,
+                name: "Shared text".into(),
+                mime: None,
+                size: 5,
+                preview: None,
+                folder: None,
+            },
             data: Data::Text("hello".into()),
         };
         run(std::slice::from_ref(&text), &dir, false).unwrap();
@@ -299,9 +364,34 @@ mod tests {
     }
 
     #[test]
+    fn saves_a_shared_folder_as_a_new_folder() {
+        let dir = scratch("tree");
+        let src = dir.join("s");
+        std::fs::write(&src, b"x").unwrap();
+        let out = dir.join("out");
+        std::fs::create_dir_all(out.join("Trip")).unwrap();
+        let in_folder = |name: &str, folder: &str| {
+            let mut item = file_item(&src, name);
+            item.info.folder = Some(folder.into());
+            item
+        };
+        let done = run(
+            &[in_folder("a.jpg", "Trip"), in_folder("b.jpg", "Trip/day 1"), in_folder("c.jpg", "Trip/../day 1")],
+            &out,
+            false,
+        )
+        .unwrap();
+        assert_eq!(done.message, "Saved Trip (2) to out");
+        assert!(out.join("Trip (2)/a.jpg").exists() && out.join("Trip (2)/day 1/b.jpg").exists());
+        assert!(out.join("Trip (2)/day 1/c.jpg").exists(), "no climbing out");
+        assert_eq!(std::fs::read_dir(out.join("Trip")).unwrap().count(), 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn refuses_a_missing_folder() {
         let items = [Payload {
-            info: ItemInfo { kind: ContentKind::Text, name: "t".into(), mime: None, size: 1, preview: None },
+            info: ItemInfo { kind: ContentKind::Text, name: "t".into(), mime: None, size: 1, preview: None, folder: None },
             data: Data::Text("x".into()),
         }];
         assert!(matches!(run(&items, Path::new("/nonexistent/nyx-share"), false), Err(SendError::Failed { .. })));

@@ -62,13 +62,16 @@ fn connected(client: &mut Option<Client>) -> Result<&Client, Error> {
     Ok(client.as_ref().expect("just connected"))
 }
 
-/// The selection's kinds, or None if anything in it can't be shared (folders,
-/// special files, unreadable paths).
+/// The selection's kinds, or None if anything in it can't be shared (special
+/// files, unreadable paths). A folder is shared as its files.
 fn kinds(paths: &[String]) -> Option<Vec<ContentKind>> {
     paths
         .iter()
         .map(|p| {
-            std::fs::metadata(p).ok().filter(|m| m.is_file())?;
+            let meta = std::fs::metadata(p).ok().filter(|m| m.is_file() || m.is_dir())?;
+            if meta.is_dir() {
+                return Some(ContentKind::File);
+            }
             let image = nyx_share_core::mime::guess(p).is_some_and(|m| m.starts_with("image/"));
             Some(if image { ContentKind::Image } else { ContentKind::File })
         })

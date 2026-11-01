@@ -397,7 +397,12 @@ pub(crate) fn deliver(nearby: &Nearby, target: &sender::Target, who: &str, task:
                 source: sender::Source::Bytes(text.as_bytes()),
             },
             Data::File(file) => sender::Outgoing {
-                name: item.info.name.clone(),
+                // LocalSend keeps a shared folder's layout through the name.
+                name: nyx_share_providers::folder_of(item)
+                    .into_iter()
+                    .chain([nyx_share_core::names::sanitize(&item.info.name)])
+                    .collect::<Vec<_>>()
+                    .join("/"),
                 size: item.info.size,
                 mime: item.info.mime.clone().unwrap_or_else(|| "application/octet-stream".into()),
                 preview: None,
