@@ -29,11 +29,12 @@ plus any outputs. A destination declares the kinds it takes, an optional
 
 | `localsend` | `localsend:<key>` (each nearby device) | text, url, image, file | LocalSend v2 upload to a device found on the network or tailnet, pinned to its key; see [LOCALSEND.md](LOCALSEND.md). Saved computers are left to `computers`. |
 | `computers` | `computer:<id>` (each saved computer) | text, url, image, file | Always listed, with LAN, Tailscale or Offline as status. Sending re-checks the routes in order and pins the saved key. |
+| `flux` | `flux:<id>` (each device paired in Flux) | text, url, image, file; 100 | Through fluxd's socket: `share.url`, `share.text`, `share.files` with staged files, progress from its transfers; see [FLUX.md](FLUX.md). |
 | `nas` | `nas:<id>` (each NAS folder) | text, image, file | GVfs copy with partial files and no replacing; `subfolder` option; see [NAS.md](NAS.md). |
 
 ## Planned
 
-Flux, Nyx Mail, Nyx Cloud, Nyx Pulse, Bluetooth,
+SMS through Flux, Nyx Mail, Nyx Cloud, Nyx Pulse, Bluetooth,
 QR code, Nyx Notes and Nyx Assistant; see [ROADMAP.md](ROADMAP.md).
 
 ## External providers (design, not implemented)

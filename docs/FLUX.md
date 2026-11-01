@@ -1,34 +1,58 @@
-# Flux (Phase 6, not implemented)
+# Phones through Flux
 
-Phones come through [Flux](https://github.com/bjarneo/flux), used as an external
-program; Nyx Share doesn't fork it or reimplement its device protocol.
+Phones and tablets paired in [Flux](https://github.com/bjarneo/flux) appear in
+Share under My devices. Flux stays an external program: Share doesn't pair,
+discover or talk to devices itself, and doesn't parse `flux-cli` output. The code
+is `crates/nyx-share-flux`.
 
-## What Flux offers (audited: 0.18.0 installed, v0.7.1 source)
+## What Share uses
 
-- `fluxd`, a user service, owns devices and networking. Its only IPC is
-  newline-delimited JSON on `$XDG_RUNTIME_DIR/flux/fluxd.sock` (0600), with ids
-  to match replies: `{"id":1,"method":"share.url","params":{"device":"Pixel","url":"…"}}`.
-- Methods used by Share: `state` (devices with `id`, `name`, `type`, `paired`,
-  `online`, `plugins`, `lastSeen`; transfers with progress), `subscribe` (state
-  events), `share.files` (absolute paths; returns transfer ids), `share.url`,
-  `share.text`, `clipboard.send`, `sms.send` (one recipient; needs the phone's
-  Text messages plugin), `transfer.cancel`.
-- Errors come back as codes: `offline`, `not_paired`, `not_supported`,
-  `unsupported`, `no_device`, `ambiguous`, `bad_params`, …
-- Pairing and discovery need the LAN. Off the LAN, Flux dials up to five
-  "extra addresses", such as a Tailscale name.
-- There is no D-Bus interface, and `flux-cli` prints JSON only for `status --json`.
+`fluxd`, Flux's user service, answers newline-delimited JSON on
+`$XDG_RUNTIME_DIR/flux/fluxd.sock` (0600), or `$FLUX_SOCKET`, with ids to match
+replies (`{"id":1,"method":"share.url","params":{"device":"…","url":"…"}}`).
+Checked against Flux 0.19.1:
 
-## Design
+| Method | For |
+| --- | --- |
+| `state` | Devices (`id`, `name`, `type`, `paired`, `online`, `plugins`) and transfers (`id`, `state`, `done`, `error`). Share reads only these two lists. |
+| `share.url` | `http`/`https` links. |
+| `share.text` | Text, and links with other schemes. At most 256 KiB. |
+| `share.files` | Files and images, as absolute paths. Flux copies each into its outbox before it answers, and returns transfer ids. |
+| `transfer.cancel` | Cancelling a job. |
 
-- A provider that talks to the socket directly (structured errors), not by
-  parsing `flux-cli` output; it is unavailable, with a reason, if the socket is
-  missing.
-- Paired devices appear under My devices; capabilities follow each device's
-  `plugins` (no SMS destination unless the `sms` plugin is on).
-- `share.files` takes paths, so the provider hands Flux a private copy of each
-  item (from the descriptor) and removes it when the transfer finishes.
-- SMS goes through `sms.send` only. RCS or Google Messages features are not
-  assumed, and private Google APIs are out of scope.
-- A device reachable through both Flux and LocalSend is one entry with both
-  capabilities, matched by explicit user pairing, never by name.
+Errors come back with a code and a sentence (`offline`, `not_paired`,
+`too_large`, …); Share shows the sentence.
+
+## Behaviour
+
+- A device is listed when it is paired and has the **share** plugin on; its
+  status says "Flux", or "Offline · Flux sends files when it's back". Nothing
+  is listed while fluxd isn't running. The list is cached for three seconds.
+- Text and links go at once and need the device online.
+- Files are staged under their own names in a private folder
+  (`$XDG_CACHE_HOME/nyx-share/flux/<random>/`, 0700): a hard link to the open
+  file where the filesystem allows, otherwise a copy (after checking free
+  space). Flux copies them into its outbox, and the folder is removed when the
+  job ends.
+- Progress follows Flux's transfers. Cancelling cancels them in Flux too. A
+  failed transfer fails the job with Flux's reason.
+- Files for an offline device wait in Flux's outbox; the job then completes with
+  "Waiting in Flux: 1 file goes when Pandora is back" instead of keeping Share
+  running.
+- At most 100 items per share, Flux's outbox limit.
+
+## Not done
+
+- SMS (`sms.send`): no destination yet; it would need the phone's Text messages
+  plugin.
+- A phone reachable through both Flux and LocalSend shows twice. Merging them
+  needs an explicit link made by you, never a match by name.
+- Folders (Flux would zip them) aren't offered, like every destination.
+
+## Checked
+
+With a fake fluxd in the crate's tests (listing, links, text, files with name
+clashes, an offline phone, a failed transfer, cancelling a running transfer,
+the copy fallback), and with Flux 0.19.1 and a paired Android phone: Flux took
+a link and a text and reported the file delivered, and the staging folder was
+gone afterwards.

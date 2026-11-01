@@ -53,6 +53,11 @@ remote device without explicit trust (from Phase 3).
   is refused. Writes go to a partial file and never replace an existing one;
   sources are only read. A subfolder may not contain `.` or `..`, and each of
   its parts is reduced to a safe name.
+- Phones through Flux ([FLUX.md](FLUX.md)): Share talks only to fluxd's own
+  socket (0600) and never pairs devices. Files are staged in a private folder
+  (0700) as hard links or copies, never moved, and the folder is removed when
+  the job ends. Of fluxd's state Share reads only the device and transfer
+  lists, never the clipboard or notifications it also holds.
 - External providers are not implemented; they will run out of process with
   enforced permissions (see [PROVIDERS.md](PROVIDERS.md)).
 

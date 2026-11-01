@@ -28,6 +28,7 @@ fn main() -> anyhow::Result<()> {
         nyx_share_providers::builtin().into_iter().map(Arc::from).collect();
     let nas_folders = Arc::new(std::sync::RwLock::new(nas::load()));
     providers.push(Arc::new(nyx_share_nas::NasProvider(nas_folders.clone())));
+    providers.push(Arc::new(nyx_share_flux::FluxProvider::new(nyx_share_flux::socket_path())));
     let state = Arc::new(State::new(providers, config::load(), nas_folders));
     async_io::block_on(async {
         let conn = zbus::connection::Builder::session()?

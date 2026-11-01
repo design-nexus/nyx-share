@@ -722,6 +722,18 @@ impl App {
 
     fn render_devices(self: &Rc<Self>) {
         clear(&self.devices);
+        let all = self.dests.borrow().clone();
+        let mine: Vec<Destination> = all.iter().filter(|d| d.section == Section::Devices).cloned().collect();
+        let dests: Vec<Destination> = all.iter().filter(|d| d.section == Section::Nearby).cloned().collect();
+        let items = self.items.borrow().clone();
+        let kinds = nyx_share_core::kinds_of(&items.iter().map(Chosen::kind).collect::<Vec<_>>());
+        // Saved devices (computers, phones in Flux, NAS folders) come first;
+        // only some of them need nearby sharing.
+        if !mine.is_empty() {
+            self.devices.append(&sheet::section_title("My devices"));
+            self.devices.append(&self.device_list(&mine, &items, &kinds));
+        }
+
         let head = widgets::hbox(8);
         head.add_css_class("share-section-title");
         head.append(&widgets::label("Nearby devices", ""));
@@ -750,28 +762,6 @@ impl App {
             self.devices.append(&e);
             return;
         }
-        let all = self.dests.borrow().clone();
-        let mine: Vec<Destination> = all.iter().filter(|d| d.section == Section::Devices).cloned().collect();
-        let dests: Vec<Destination> = all.iter().filter(|d| d.section == Section::Nearby).cloned().collect();
-        let items = self.items.borrow().clone();
-        let kinds = nyx_share_core::kinds_of(&items.iter().map(Chosen::kind).collect::<Vec<_>>());
-        if !mine.is_empty() {
-            // My computers come first, above the devices found nearby.
-            self.devices.remove(&head);
-            self.devices.append(&sheet::section_title("My computers"));
-            let list = widgets::vbox(0);
-            list.add_css_class("card");
-            list.add_css_class("app-devices");
-            for (i, d) in mine.iter().enumerate() {
-                let row = self.device_row(d, &items, &kinds);
-                if i > 0 {
-                    row.add_css_class("following");
-                }
-                list.append(&row);
-            }
-            self.devices.append(&list);
-            self.devices.append(&head);
-        }
         if dests.is_empty() {
             let weak = Rc::downgrade(self);
             let action: widgets::Action<'_> = Some((
@@ -793,17 +783,21 @@ impl App {
             self.devices.append(&e);
             return;
         }
-        let list = widgets::vbox(0);
-        list.add_css_class("card");
-        list.add_css_class("app-devices");
-        for (i, d) in dests.iter().enumerate() {
-            let row = self.device_row(d, &items, &kinds);
+        self.devices.append(&self.device_list(&dests, &items, &kinds));
+    }
+
+    fn device_list(self: &Rc<Self>, list: &[Destination], items: &[Chosen], kinds: &[ContentKind]) -> gtk::Box {
+        let card = widgets::vbox(0);
+        card.add_css_class("card");
+        card.add_css_class("app-devices");
+        for (i, d) in list.iter().enumerate() {
+            let row = self.device_row(d, items, kinds);
             if i > 0 {
                 row.add_css_class("following");
             }
-            list.append(&row);
+            card.append(&row);
         }
-        self.devices.append(&list);
+        card
     }
 
     fn job_for(&self, dest: &str) -> Option<(Job, Instant)> {

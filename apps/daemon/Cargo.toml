@@ -17,6 +17,7 @@ nyx-share-dbus.workspace = true
 nyx-share-providers.workspace = true
 nyx-share-localsend.workspace = true
 nyx-share-nas.workspace = true
+nyx-share-flux.workspace = true
 anyhow.workspace = true
 async-io.workspace = true
 async-channel.workspace = true

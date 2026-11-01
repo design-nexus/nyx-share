@@ -943,6 +943,7 @@ dependencies = [
  "libc",
  "nyx-share-core",
  "nyx-share-dbus",
+ "nyx-share-flux",
  "nyx-share-localsend",
  "nyx-share-nas",
  "nyx-share-providers",
@@ -960,6 +961,18 @@ dependencies = [
  "nyx-share-core",
  "serde",
  "zbus",
+]
+
+[[package]]
+name = "nyx-share-flux"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "nyx-share-core",
+ "nyx-share-providers",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

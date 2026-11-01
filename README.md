@@ -16,6 +16,7 @@ cloud service, account or relay.
 | Save to folder | Any number of files, images and texts | Copies into a folder you pick. Never moves or overwrites: a taken name becomes `name (2).ext`. |
 | Nearby devices | Files, images, text and links | Phones, tablets and computers running LocalSend on your network, over encrypted connections pinned to each device's key. |
 | My computers | Files, images, text and links | Computers you saved, reached over the LAN or Tailscale (LAN first), known by their device key rather than their address. Ones you trust can send to you without asking. |
+| Phones in Flux | Files, images, text and links | Phones and tablets paired in [Flux](https://github.com/bjarneo/flux); files for an offline phone wait in Flux. See [FLUX.md](docs/FLUX.md). |
 | NAS folders | Files, images and text | A folder on an SMB, SFTP or NFS share, through GVfs like Nyx Files. Copies only; passwords stay in your keyring. See [NAS.md](docs/NAS.md). |
 
 While the service runs (when you share, and for a minute after), this computer
@@ -25,7 +26,7 @@ Downloads folder. See [LOCALSEND.md](docs/LOCALSEND.md).
 
 Transfers run in the service, so closing the Share Sheet doesn't stop them, and
 the service notifies you when one finishes after the sheet has closed. Phones
-through Flux, Nyx app destinations and the Settings page are planned; see
+through SMS, Nyx app destinations and the Settings page are planned; see
 [the roadmap](docs/ROADMAP.md). Nothing in the sheet appears for a destination
 that doesn't exist yet.
 
