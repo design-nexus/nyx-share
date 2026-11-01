@@ -162,6 +162,30 @@ impl Content {
         self
     }
 
+    /// Add content that exists only in memory, such as an edited picture. It is
+    /// written to a private file that is removed at once; the service reads it
+    /// through the read-only descriptor, so nothing is left behind.
+    pub fn bytes(&mut self, kind: ContentKind, name: &str, mime: Option<&str>, bytes: &[u8]) -> Result<&mut Self, Error> {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(std::env::temp_dir)
+            .join("nyx-share-client");
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+        let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let path = dir.join(format!("{}-{unique}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        let written = (|| -> std::io::Result<File> {
+            let mut out = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+            out.write_all(bytes)?;
+            File::open(&path)
+        })();
+        let _ = std::fs::remove_file(&path);
+        Ok(self.open_file(written?, kind, Some(name.to_string()), mime.map(str::to_string)))
+    }
+
     fn parts(&self) -> (String, Vec<Fd<'_>>) {
         (to_json(&self.items), self.files.iter().map(Fd::from).collect())
     }
@@ -332,5 +356,29 @@ impl Client {
     /// The Share Sheet's private interface.
     pub fn sheet(&self) -> Result<ShareSheetProxyBlocking<'static>, Error> {
         Ok(ShareSheetProxyBlocking::new(&self.conn)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn bytes_leave_no_file_behind() {
+        let mut content = Content::new();
+        content.bytes(ContentKind::Image, "edited.png", Some("image/png"), b"\x89PNG data").unwrap();
+        assert_eq!(content.kinds(), vec![ContentKind::Image]);
+        let mut read = String::new();
+        let mut f = content.files[0].try_clone().unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        read.push_str(&String::from_utf8_lossy(&buf));
+        assert!(read.ends_with("PNG data"));
+        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("nyx-share-client");
+        let leftover = std::fs::read_dir(dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(&format!("{}-", std::process::id())));
+        assert!(!leftover);
+        // Opened read-only, as the service requires.
+        assert!(std::io::Write::write_all(&mut content.files[0], b"x").is_err());
     }
 }

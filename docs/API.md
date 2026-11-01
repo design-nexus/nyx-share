@@ -125,7 +125,10 @@ let job = client.share_to("clipboard", &content, &Default::default())?;
 let done = client.wait(&job, |_| {})?;
 ```
 
-`Client::events()` yields `JobChanged` and `DestinationsChanged` as they happen.
+`Content::file(path)` opens a file read-only; `Content::bytes(kind, name, mime,
+bytes)` shares something that exists only in memory (an edited picture, an
+exported page) through a private file removed at once. `Client::events()` yields
+`JobChanged` and `DestinationsChanged` as they happen.
 
 ## Compatibility check
 
