@@ -60,6 +60,8 @@ struct App {
     back: gtk::Button,
     refresh: gtk::Button,
     stack: gtk::Stack,
+    /// Nearby and Transfers, one size so switching tabs doesn't resize the window.
+    tab_pages: gtk::Stack,
     tray: gtk::Box,
     devices: gtk::Box,
     transfers: gtk::Box,
@@ -186,9 +188,20 @@ fn build(app: &gtk::Application, client: Arc<Client>) {
     nearby.append(&tray);
     let devices = widgets::vbox(0);
     nearby.append(&devices);
-    stack.add_named(&nearby, Some("nearby"));
     let transfers = widgets::vbox(0);
-    stack.add_named(&transfers, Some("transfers"));
+    let tab_pages = gtk::Stack::new();
+    tab_pages.set_vhomogeneous(true);
+    tab_pages.set_hhomogeneous(true);
+    for (page, name) in [(&nearby, "nearby"), (&transfers, "transfers")] {
+        let scroll = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(620)
+            .child(page)
+            .build();
+        tab_pages.add_named(&scroll, Some(name));
+    }
+    stack.add_named(&tab_pages, Some("tabs"));
     let settings = widgets::vbox(0);
     // Settings grow with every computer and NAS folder; keep the window compact.
     let settings_scroll = gtk::ScrolledWindow::builder()
@@ -227,6 +240,7 @@ fn build(app: &gtk::Application, client: Arc<Client>) {
         back,
         refresh,
         stack,
+        tab_pages,
         tray,
         devices,
         transfers,
@@ -415,7 +429,12 @@ impl App {
                 }
             }
         }
-        self.stack.set_visible_child_name(page);
+        if settings {
+            self.stack.set_visible_child_name("settings");
+        } else {
+            self.tab_pages.set_visible_child_name(page);
+            self.stack.set_visible_child_name("tabs");
+        }
     }
 
     /// Keep the service running while the window is open, then fetch everything.
