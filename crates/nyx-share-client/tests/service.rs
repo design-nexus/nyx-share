@@ -9,7 +9,7 @@
 //! nothing reaches the real one) and a stand-in for the Share Sheet that records
 //! the request it was given. Nothing opens on screen.
 
-use nyx_share_client::{Client, Content, ContentKind, Error, JobState, PreferencesUpdate, ShareOptions};
+use nyx_share_client::{Client, Content, ContentKind, Error, JobState, NasInfo, PreferencesUpdate, ShareOptions};
 use std::fs::{File, OpenOptions};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
@@ -40,6 +40,7 @@ fn service() -> &'static Service {
             .env("XDG_CONFIG_HOME", root.join("config"))
             .env("XDG_STATE_HOME", root.join("state"))
             .env("FLUX_SOCKET", root.join("no-flux.sock"))
+            .env("NYX_SHARE_SECRETS_DIR", root.join("secrets"))
             .env("NYX_SHARE_SHEET", &sheet)
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("INVOCATION_ID")
@@ -248,4 +249,30 @@ fn keeps_destination_preferences() {
     let saved = std::fs::read_to_string(service().root.join("config/nyx-share/destinations.toml")).unwrap();
     assert!(saved.contains("clipboard"));
     client.set_preferences(&PreferencesUpdate { pinned: Some(vec![]), hidden: Some(vec![]), order: Some(vec![]) }).unwrap();
+}
+
+#[test]
+#[ignore]
+fn keeps_nas_passwords_out_of_the_settings_file() {
+    let root = &service().root;
+    let target = scratch("nas-target");
+    let client = Client::connect().unwrap();
+    let folder = NasInfo {
+        name: "Test NAS".into(),
+        uri: format!("file://{}", target.display()),
+        username: Some("ken".into()),
+        password: Some("hunter2".into()),
+        ..Default::default()
+    };
+    let id = client.save_nas(&folder).unwrap();
+    let saved = std::fs::read_to_string(root.join("config/nyx-share/nas.toml")).unwrap();
+    assert!(!saved.contains("hunter2") && !saved.contains("password"), "{saved}");
+    assert_eq!(std::fs::read_to_string(root.join("secrets").join(&id)).unwrap(), "hunter2");
+    let listed = client.nas().unwrap().into_iter().find(|n| n.id == id).unwrap();
+    assert!(listed.has_password && listed.password.is_none());
+
+    client.save_nas(&NasInfo { id: id.clone(), password: Some(String::new()), ..listed }).unwrap();
+    assert!(!root.join("secrets").join(&id).exists());
+    assert!(!client.nas().unwrap().into_iter().find(|n| n.id == id).unwrap().has_password);
+    client.remove_nas(&id).unwrap();
 }

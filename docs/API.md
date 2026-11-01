@@ -27,7 +27,7 @@ version; anything else gets `Share2`.
 | `SaveComputer` | `(s computer) → ()` | Change a saved computer (name, routes, `prefer`, `trusted`, `receive_folder`); its key can't change. |
 | `RemoveComputer` | `(s id) → ()` | |
 | `ListNas` | `() → s` | JSON array of NAS folders (fields as in [NAS.md](NAS.md#settings)), each with `has_password`. |
-| `SaveNas` | `(s folder) → s` | Add (empty `id`) or change a NAS folder; returns its id. Store the password in the Secret Service first (`application=nyx-share`, `nas=<id>`). |
+| `SaveNas` | `(s folder) → s` | Add (empty `id`) or change a NAS folder; returns its id. An optional `password` field is stored in the Secret Service (`application=nyx-share`, `nas=<id>`; empty clears it), never in `nas.toml`, and never listed. |
 | `RemoveNas` | `(s id) → ()` | Also removes its saved password. |
 | `TestNas` | `(s id) → s` | Connect and check the folder can be written to; a sentence, or `Failed` with the reason. |
 

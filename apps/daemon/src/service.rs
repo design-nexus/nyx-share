@@ -319,15 +319,27 @@ impl Share1 {
         json(&out)
     }
 
-    /// Add (empty `id`) or change a NAS folder. Returns its id. Store its
-    /// password in the Secret Service first (attributes application=nyx-share, nas=<id>).
+    /// Add (empty `id`) or change a NAS folder. Returns its id. A `password`
+    /// field is stored in the Secret Service (attributes application=nyx-share,
+    /// nas=<id>; empty clears it) and never written to nas.toml.
     async fn save_nas(&self, folder: &str, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> fdo::Result<String> {
         self.0.touch();
-        let mut n: nyx_share_nas::Nas =
+        let mut value: serde_json::Value =
             serde_json::from_str(folder).map_err(|e| fdo::Error::InvalidArgs(format!("Not a NAS folder: {e}")))?;
+        let password = value.as_object_mut().and_then(|o| o.remove("password")).and_then(|p| p.as_str().map(String::from));
+        let mut n: nyx_share_nas::Nas =
+            serde_json::from_value(value).map_err(|e| fdo::Error::InvalidArgs(format!("Not a NAS folder: {e}")))?;
         n.validate().map_err(fdo::Error::InvalidArgs)?;
         if n.id.is_empty() {
             n.id = uuid::Uuid::new_v4().to_string();
+        }
+        match password.as_deref() {
+            Some("") => nyx_share_nas::secrets::clear(&n.id),
+            Some(secret) => {
+                let (id, name, secret) = (n.id.clone(), n.name.clone(), secret.to_string());
+                blocking_task(move || nyx_share_nas::secrets::store(&id, &name, &secret)).await.map_err(fdo::Error::Failed)?;
+            }
+            None => {}
         }
         let mut list = self.0.nas.read().unwrap_or_else(|e| e.into_inner()).clone();
         match list.iter_mut().find(|x| x.id == n.id) {

@@ -143,6 +143,10 @@ pub struct NasInfo {
     /// A password is saved in the Secret Service. Read only.
     #[serde(skip_serializing)]
     pub has_password: bool,
+    /// Write-only, for SaveNas: stored in the Secret Service (empty clears it),
+    /// never in nas.toml and never listed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
 }
 
 /// A saved computer: its key, addresses and trust.

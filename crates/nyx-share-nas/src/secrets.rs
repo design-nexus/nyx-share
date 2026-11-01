@@ -25,7 +25,8 @@ pub fn password(id: &str) -> Option<String> {
 
 pub fn store(id: &str, label: &str, password: &str) -> Result<(), String> {
     if let Some(dir) = test_dir() {
-        use std::os::unix::fs::OpenOptionsExt;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir).map_err(|e| e.to_string())?;
         let mut f = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
