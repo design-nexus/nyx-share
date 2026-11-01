@@ -13,11 +13,14 @@ version; anything else gets `Share2`.
 | `Share` | `(s items, ah fds, s options) → s` | Request id. Opens the Share Sheet. |
 | `ShareTo` | `(s destination, s items, ah fds, s options) → s` | Job id. Sends without the sheet. |
 | `ListDestinations` | `(as kinds, u count) → s` | JSON array of destinations that accept `count` items of `kinds`; every destination when `kinds` is empty. Hidden ones are included and marked. |
-| `GetCapabilities` | `() → s` | JSON: `version`, `providers` (`id`, `name`, `kinds`, `available`, `status`), `max_items`, `max_text_bytes`. |
+| `GetCapabilities` | `() → s` | JSON: `version`, `providers` (`id`, `name`, `kinds`, `available`, `status`, `enabled`), `max_items`, `max_text_bytes`. |
 | `ListJobs` | `() → s` | JSON array of jobs, newest first: running ones and the last 50 finished ones (kept in `$XDG_STATE_HOME/nyx-share/history.json`). |
 | `GetJob` | `(s id) → s` | JSON job. |
 | `CancelJob` | `(s id) → ()` | |
-| `SetDestinationPreferences` | `(s update) → ()` | `{"order":[…],"pinned":[…],"hidden":[…]}`; each list present replaces the saved one. |
+| `SetDestinationPreferences` | `(s update) → ()` | `{"order":[…],"pinned":[…],"hidden":[…],"disabled":[provider ids],"default":"id","history":50}`; each field present replaces the saved one (`"default":""` clears it; `history` is how many finished transfers are kept, at most 500). Destinations of disabled providers aren't listed or accepted. |
+| `GetPreferences` | `() → s` | The same fields as JSON, with the history limit in effect. |
+| `RetryJob` | `(s id) → s` | Run a failed job again as a new job (its id); possible while `retryable` is true (30 minutes, the last 20 failures). Not for sandboxed callers. |
+| `ClearHistory` | `() → ()` | Forget finished transfers. Not for sandboxed callers. |
 | `Scan` | `() → ()` | Ask nearby devices to answer now. |
 | `Hold` | `() → ()` | Keep the service, and Nearby visibility, running while the caller stays on the bus. |
 | `GetNearby` | `() → s` | JSON: `enabled`, `visibility` (`running` or `off`), `alias`, `fingerprint`, `receive_folder`, `problem`, `tailscale`, `tailscale_state`. |
@@ -90,7 +93,8 @@ available.
  "outputs": ["/home/me/Backups/a.pdf", "/home/me/Backups/b (2).pdf"], "created": 1793400000, "updated": 1793400001}
 ```
 
-`state` is `queued`, `running`, `completed`, `failed` or `cancelled`; `message`
+`state` is `queued`, `running`, `completed`, `failed` or `cancelled` (with
+`retryable` on a failed job that `RetryJob` can run again); `message`
 is a sentence for people; `outputs` lists what was created. While a job runs,
 `step` may say what it is doing before any bytes move ("Connecting to NAS
 Documents…"); it is cleared once bytes flow. `direction` is

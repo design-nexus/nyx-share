@@ -221,6 +221,14 @@ impl Share1 {
         if self.0.cancel(id) { Ok(()) } else { Err(fdo::Error::UnknownObject(format!("There is no job {id}"))) }
     }
 
+    /// The arrangement and settings as JSON: order, pinned, hidden, disabled, default, history.
+    fn get_preferences(&self) -> String {
+        self.0.touch();
+        let mut v = serde_json::to_value(self.0.preferences()).unwrap_or_default();
+        v["history"] = self.0.preferences().history_limit().into();
+        v.to_string()
+    }
+
     async fn set_destination_preferences(
         &self,
         update: &str,

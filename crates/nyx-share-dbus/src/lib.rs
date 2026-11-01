@@ -50,6 +50,8 @@ pub trait Share {
 
     fn retry_job(&self, id: &str) -> zbus::Result<String>;
 
+    fn get_preferences(&self) -> zbus::Result<String>;
+
     fn clear_history(&self) -> zbus::Result<()>;
 
     /// JSON [`nyx_share_core::PreferencesUpdate`]: the lists it contains replace the saved ones.

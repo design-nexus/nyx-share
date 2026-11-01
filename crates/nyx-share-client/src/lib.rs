@@ -248,6 +248,11 @@ impl Client {
         Ok(self.proxy.retry_job(id)?)
     }
 
+    /// The arrangement and settings (`history` is the limit in effect).
+    pub fn preferences(&self) -> Result<nyx_share_core::Preferences, Error> {
+        json(&self.proxy.get_preferences()?)
+    }
+
     /// Forget finished transfers.
     pub fn clear_history(&self) -> Result<(), Error> {
         Ok(self.proxy.clear_history()?)

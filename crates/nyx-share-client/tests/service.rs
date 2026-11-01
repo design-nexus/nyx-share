@@ -332,6 +332,7 @@ fn retries_failed_jobs_and_keeps_settings() {
 
     // The history keeps as many as asked, and clears.
     client.set_preferences(&PreferencesUpdate { history: Some(1), ..Default::default() }).unwrap();
+    assert_eq!(client.preferences().unwrap().history, Some(1));
     assert!(client.jobs().unwrap().iter().filter(|j| j.state.finished()).count() <= 1);
     client.clear_history().unwrap();
     assert!(client.jobs().unwrap().iter().all(|j| !j.state.finished()));
