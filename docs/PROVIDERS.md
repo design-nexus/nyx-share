@@ -14,7 +14,8 @@ pub trait Provider: Send + Sync {
 ```
 
 `send` runs on a worker thread. It reads items through `Task::items` (text, or a
-file read with positional reads), reports bytes through `Task::progress`,
+file read with positional reads), reports bytes through `Task::progress` (and, before any bytes move, what it is
+doing through `Task::step`, such as connecting),
 checks `Task::cancelled()` between chunks, and returns a sentence for the user
 plus any outputs. A destination declares the kinds it takes, an optional
 `max_items` and `needs_folder`; the service enforces those before `send` runs.

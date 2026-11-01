@@ -89,7 +89,9 @@ available.
 ```
 
 `state` is `queued`, `running`, `completed`, `failed` or `cancelled`; `message`
-is a sentence for people; `outputs` lists what was created. `direction` is
+is a sentence for people; `outputs` lists what was created. While a job runs,
+`step` may say what it is doing before any bytes move ("Connecting to NAS
+Documents…"); it is cleared once bytes flow. `direction` is
 `send`, or `receive` for files arriving from a nearby device (then
 `destination_name` is the sender).
 

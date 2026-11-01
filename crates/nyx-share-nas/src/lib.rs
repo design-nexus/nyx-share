@@ -308,7 +308,10 @@ fn copy(nas: &Nas, sub: &[String], task: &Task<'_>) -> Result<Outcome, SendError
 }
 
 fn copy_into(nas: &Nas, sub: &[String], task: &Task<'_>, cancellable: &gio::Cancellable) -> Result<Outcome, SendError> {
-    let folder = match open(nas, sub, cancellable) {
+    (task.step)(Some(&format!("Connecting to {}…", nas.name)));
+    let opened = open(nas, sub, cancellable);
+    (task.step)(None);
+    let folder = match opened {
         Err(_) if task.cancelled() => return Err(SendError::Cancelled { outputs: Vec::new() }),
         other => other.map_err(SendError::failed)?,
     };

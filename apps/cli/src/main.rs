@@ -168,9 +168,15 @@ fn share(args: &[String]) -> Result<ExitCode, Error> {
     }
     let tty = std::io::stderr().is_terminal();
     let job = client.wait(&id, |job| {
-        if tty && job.state == JobState::Running && job.bytes_total > 0 {
-            let pct = job.fraction().unwrap_or(0.0) * 100.0;
-            eprint!("\r\x1b[2K{} … {pct:.0}%", job.destination_name);
+        if tty && job.state == JobState::Running {
+            match &job.step {
+                Some(step) => eprint!("\r\x1b[2K{step}"),
+                None if job.bytes_total > 0 => {
+                    let pct = job.fraction().unwrap_or(0.0) * 100.0;
+                    eprint!("\r\x1b[2K{} … {pct:.0}%", job.destination_name);
+                }
+                None => {}
+            }
             let _ = std::io::stderr().flush();
         }
     })?;
@@ -369,7 +375,10 @@ fn computers(args: &[String]) -> Result<ExitCode, Error> {
 
 fn describe(job: &Job) -> String {
     match (&job.state, &job.message) {
-        (JobState::Running, _) => format!("{} of {}", units::size(job.bytes_done), units::size(job.bytes_total)),
+        (JobState::Running, _) => match &job.step {
+            Some(step) => step.clone(),
+            None => format!("{} of {}", units::size(job.bytes_done), units::size(job.bytes_total)),
+        },
         (_, Some(m)) => m.clone(),
         _ => String::new(),
     }

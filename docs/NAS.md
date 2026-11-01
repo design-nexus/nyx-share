@@ -77,7 +77,8 @@ without changing `known_hosts`, and adding a NAS folder from the Share app.
 ## Known limits
 
 - Mounting an SMB share can take 25 seconds or more on some servers, before
-  the first byte is written; the job shows 0% meanwhile.
+  the first byte is written; the sheet, the Share app and the CLI say
+  "Connecting to …" meanwhile.
 - **Test** writes and deletes a hidden `.nyx-share-check-…` file; a NAS with a
   recycle bin keeps it there.
 - NFS is untried.

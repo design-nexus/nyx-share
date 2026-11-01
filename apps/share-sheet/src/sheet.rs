@@ -872,7 +872,10 @@ impl Sheet {
         }
         let d = row.destination.clone();
         let tile_state = match job.state {
-            JobState::Queued | JobState::Running => tile::State::Busy(job.fraction()),
+            JobState::Queued | JobState::Running => match job.short_step() {
+                Some(word) => tile::State::Step(word),
+                None => tile::State::Busy(job.fraction()),
+            },
             JobState::Completed => tile::State::Done,
             JobState::Failed => tile::State::Failed,
             JobState::Cancelled => tile::State::Idle,
@@ -1015,6 +1018,7 @@ fn job_caption(job: &Job, started: Instant) -> String {
             _ => String::new(),
         },
         JobState::Cancelled => job.message.clone().filter(|m| m != "Cancelled").unwrap_or_default(),
+        JobState::Queued | JobState::Running if job.step.is_some() => job.step.clone().unwrap_or_default(),
         JobState::Queued | JobState::Running if job.bytes_total > 0 => {
             let mut parts = vec![format!("{} of {}", units::size(job.bytes_done), units::size(job.bytes_total))];
             let secs = started.elapsed().as_secs_f64();
@@ -1048,6 +1052,7 @@ mod tests {
             items: 1,
             summary: None,
             bytes_done: done,
+            step: None,
             bytes_total: 10,
             message: None,
             outputs: Vec::new(),

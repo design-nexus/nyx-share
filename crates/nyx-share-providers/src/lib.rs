@@ -49,6 +49,9 @@ pub struct Task<'a> {
     pub cancel: &'a AtomicBool,
     /// Called with the number of bytes just sent.
     pub progress: &'a (dyn Fn(u64) + Sync),
+    /// Says what the job is doing before bytes move, such as connecting; `None`
+    /// clears it. The first progress clears it too.
+    pub step: &'a (dyn Fn(Option<&str>) + Sync),
 }
 
 impl Task<'_> {

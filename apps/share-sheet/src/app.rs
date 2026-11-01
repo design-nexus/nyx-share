@@ -842,7 +842,10 @@ impl App {
                 let secs = started.elapsed().as_secs_f64();
                 let rate = (secs > 0.5 && job.bytes_done > 0)
                     .then(|| format!(" · {}/s", units::size((job.bytes_done as f64 / secs) as u64)));
-                sub.set_text(&format!("Sending · {pct}{}", rate.unwrap_or_default()));
+                match &job.step {
+                    Some(step) => sub.set_text(step),
+                    None => sub.set_text(&format!("Sending · {pct}{}", rate.unwrap_or_default())),
+                }
                 let bar = gtk::LevelBar::new();
                 bar.set_value(job.fraction().unwrap_or(0.0));
                 bar.set_margin_top(5);
@@ -1058,7 +1061,7 @@ impl App {
         right.set_valign(gtk::Align::Center);
         let status = match j.state {
             JobState::Running | JobState::Queued => {
-                j.fraction().map(|f| format!("{:.0}%", f * 100.0)).unwrap_or_else(|| "Waiting".into())
+                j.short_step().or_else(|| j.fraction().map(|f| format!("{:.0}%", f * 100.0))).unwrap_or_else(|| "Waiting".into())
             }
             JobState::Completed => if j.direction == Direction::Receive { "Received" } else { "Sent" }.into(),
             JobState::Cancelled => "Cancelled".into(),

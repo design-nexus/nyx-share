@@ -39,6 +39,9 @@ pub struct Job {
     pub summary: Option<String>,
     pub bytes_done: u64,
     pub bytes_total: u64,
+    /// What a running job is doing before bytes move: "Connecting to NAS Documents…".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<String>,
     /// What happened, in a sentence: "Copied to the clipboard", or the error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -62,6 +65,12 @@ pub fn summarize<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<String>
 }
 
 impl Job {
+    /// The step in a word or two for tight spaces: "Connecting".
+    pub fn short_step(&self) -> Option<String> {
+        let step = self.step.as_deref()?;
+        Some(step.split_whitespace().next().unwrap_or(step).trim_end_matches('…').to_string())
+    }
+
     /// Progress from 0 to 1, if the size is known.
     pub fn fraction(&self) -> Option<f64> {
         (self.bytes_total > 0).then(|| (self.bytes_done as f64 / self.bytes_total as f64).clamp(0.0, 1.0))

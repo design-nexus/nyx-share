@@ -27,6 +27,7 @@ use std::time::Duration;
 use zbus::zvariant::Fd;
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)] // short-lived; boxing would change the public type
 pub enum Event {
     JobChanged(Job),
     DestinationsChanged,

@@ -6,10 +6,12 @@ use std::cell::Cell;
 use std::f64::consts::PI;
 use std::rc::Rc;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum State {
     Idle,
     Busy(Option<f64>),
+    /// Busy before any bytes move, with a word for what it's doing.
+    Step(String),
     Done,
     Failed,
 }
@@ -129,6 +131,7 @@ impl Tile {
                 f.map(|f| format!("{:.0}%", f * 100.0)).unwrap_or_else(|| "Sending".into()),
                 Some(f.unwrap_or(0.0)),
             ),
+            State::Step(word) => (Some("busy"), word, Some(0.0)),
             State::Done => (Some("done"), "Done".into(), None),
             State::Failed => (Some("failed"), "Failed".into(), None),
         };

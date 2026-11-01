@@ -290,6 +290,7 @@ impl State {
                 _ => p.info.name.as_str(),
             })),
             bytes_done: 0,
+            step: None,
             bytes_total: items.iter().map(Payload::size).sum(),
             message: None,
             outputs: Vec::new(),
@@ -317,26 +318,35 @@ impl State {
             self.emit(&job);
         }
         let progress = |bytes: u64| {
-            self.update(id, false, |j| j.bytes_done += bytes);
+            self.update(id, false, |j| {
+                j.bytes_done += bytes;
+                j.step = None;
+            });
         };
-        let task = Task { items, options, cancel, progress: &progress };
+        let step = |text: Option<&str>| {
+            self.update(id, true, |j| j.step = text.map(str::to_string));
+        };
+        let task = Task { items, options, cancel, progress: &progress, step: &step };
         let result = provider.send(destination, &task);
-        let finished = self.update(id, true, |j| match result {
-            Ok(outcome) => {
-                j.state = JobState::Completed;
-                j.bytes_done = j.bytes_total;
-                j.message = Some(outcome.message);
-                j.outputs = outcome.outputs;
-            }
-            Err(SendError::Cancelled { outputs }) => {
-                j.state = JobState::Cancelled;
-                j.message = Some("Cancelled".into());
-                j.outputs = outputs;
-            }
-            Err(SendError::Failed { message, outputs }) => {
-                j.state = JobState::Failed;
-                j.message = Some(message);
-                j.outputs = outputs;
+        let finished = self.update(id, true, |j| {
+            j.step = None;
+            match result {
+                Ok(outcome) => {
+                    j.state = JobState::Completed;
+                    j.bytes_done = j.bytes_total;
+                    j.message = Some(outcome.message);
+                    j.outputs = outcome.outputs;
+                }
+                Err(SendError::Cancelled { outputs }) => {
+                    j.state = JobState::Cancelled;
+                    j.message = Some("Cancelled".into());
+                    j.outputs = outputs;
+                }
+                Err(SendError::Failed { message, outputs }) => {
+                    j.state = JobState::Failed;
+                    j.message = Some(message);
+                    j.outputs = outputs;
+                }
             }
         });
         self.save_history();
@@ -360,6 +370,7 @@ impl State {
             items: offer.files.len() as u32,
             summary: summarize(offer.files.iter().map(|f| f.file_name.as_str())),
             bytes_done: 0,
+            step: None,
             bytes_total: offer.total,
             message: None,
             outputs: Vec::new(),
