@@ -2,15 +2,13 @@
 //! owns pairing and the connection; Share only asks it to send, over its
 //! socket of JSON lines (`{"id":1,"method":"share.url","params":{…}}`).
 
-use nyx_share_core::{ContentKind, Destination, Section, names};
+use nyx_share_core::{ContentKind, Destination, Section};
+use nyx_share_providers::stage::Stage;
 use nyx_share_providers::{Data, Outcome, Payload, Provider, SendError, Task};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use std::os::fd::AsRawFd;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{DirBuilderExt, FileExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -378,70 +376,6 @@ fn follow(conn: &mut Conn, device: &Device, ids: &[String], task: &Task<'_>) -> 
         }
         std::thread::sleep(Duration::from_millis(400));
     }
-}
-
-/// A private folder for the files handed to Flux, removed when dropped.
-struct Stage {
-    dir: PathBuf,
-    names: HashSet<String>,
-}
-
-impl Stage {
-    fn new(base: &Path) -> std::io::Result<Self> {
-        let dir = base.join(uuid::Uuid::new_v4().simple().to_string());
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
-        Ok(Self { dir, names: HashSet::new() })
-    }
-
-    /// The item under its own name: a hard link to the open file where the
-    /// filesystem allows one, else a copy.
-    fn place(&mut self, file: &std::fs::File, name: &str, size: u64, task: &Task<'_>) -> Result<PathBuf, SendError> {
-        let mut chosen = names::sanitize(name);
-        let mut n = 2;
-        while !self.names.insert(chosen.clone()) {
-            chosen = names::alternative(&names::sanitize(name), n);
-            n += 1;
-        }
-        let path = self.dir.join(&chosen);
-        if link(file, &path).is_ok() {
-            return Ok(path);
-        }
-        let free = nyx_share_providers::free_bytes(&self.dir).unwrap_or(u64::MAX);
-        if free < size.saturating_add(64 << 20) {
-            return Err(SendError::failed("There isn't room to prepare the files for Flux"));
-        }
-        let mut out =
-            std::fs::File::create_new(&path).map_err(|e| SendError::failed(format!("Couldn't prepare {chosen}: {e}")))?;
-        let mut buf = vec![0u8; 1 << 20];
-        let mut offset = 0u64;
-        loop {
-            if task.cancelled() {
-                return Err(SendError::Cancelled { outputs: Vec::new() });
-            }
-            let read = file.read_at(&mut buf, offset).map_err(|e| SendError::failed(format!("Couldn't read {chosen}: {e}")))?;
-            if read == 0 {
-                break;
-            }
-            out.write_all(&buf[..read]).map_err(|e| SendError::failed(format!("Couldn't prepare {chosen}: {e}")))?;
-            offset += read as u64;
-        }
-        Ok(path)
-    }
-}
-
-impl Drop for Stage {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-/// Hard-link an open file to `path` (Linux: through /proc/self/fd).
-fn link(file: &std::fs::File, path: &Path) -> std::io::Result<()> {
-    let source = std::ffi::CString::new(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
-    let target = std::ffi::CString::new(path.as_os_str().as_bytes())?;
-    // SAFETY: both are valid NUL-terminated paths for the duration of the call.
-    let rc = unsafe { libc::linkat(libc::AT_FDCWD, source.as_ptr(), libc::AT_FDCWD, target.as_ptr(), libc::AT_SYMLINK_FOLLOW) };
-    if rc == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
 }
 
 #[cfg(test)]

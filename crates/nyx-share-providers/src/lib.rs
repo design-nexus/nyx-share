@@ -4,6 +4,8 @@
 mod clipboard;
 mod folder;
 pub mod process;
+pub mod qr;
+pub mod stage;
 
 pub use clipboard::Clipboard;
 pub use folder::{Folder, free_bytes, save_stream};
@@ -89,7 +91,7 @@ pub trait Provider: Send + Sync {
 
 /// The providers in this release.
 pub fn builtin() -> Vec<Box<dyn Provider>> {
-    vec![Box::new(Clipboard), Box::new(Folder)]
+    vec![Box::new(Clipboard), Box::new(Folder), Box::new(qr::Qr)]
 }
 
 /// Stream a file to `out` in 1 MiB positional reads, reporting progress and

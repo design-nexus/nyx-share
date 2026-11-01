@@ -1,0 +1,11 @@
+# An example Nyx Share provider: counts the words in shared text and files.
+# Copy this folder to ~/.local/share/nyx-share/providers/word-count/.
+id = "word-count"
+name = "Word count"
+exec = "word-count"
+kinds = ["text", "url", "file"]
+max_items = 20
+icon = "accessories-text-editor-symbolic"
+
+[permissions]
+network = false

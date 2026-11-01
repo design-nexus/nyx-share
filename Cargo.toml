@@ -8,6 +8,8 @@ members = [
     "crates/nyx-share-localsend",
     "crates/nyx-share-nas",
     "crates/nyx-share-flux",
+    "crates/nyx-share-apps",
+    "crates/nyx-share-external",
     "apps/daemon",
     "apps/share-sheet",
     "apps/cli",
@@ -28,6 +30,8 @@ nyx-share-providers = { path = "crates/nyx-share-providers" }
 nyx-share-localsend = { path = "crates/nyx-share-localsend" }
 nyx-share-nas = { path = "crates/nyx-share-nas" }
 nyx-share-flux = { path = "crates/nyx-share-flux" }
+nyx-share-apps = { path = "crates/nyx-share-apps" }
+nyx-share-external = { path = "crates/nyx-share-external" }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

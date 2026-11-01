@@ -58,8 +58,18 @@ remote device without explicit trust (from Phase 3).
   (0700) as hard links or copies, never moved, and the folder is removed when
   the job ends. Of fluxd's state Share reads only the device and transfer
   lists, never the clipboard or notifications it also holds.
-- External providers are not implemented; they will run out of process with
-  enforced permissions (see [PROVIDERS.md](PROVIDERS.md)).
+- Nyx apps (Notes, Mail, Pulse) are reached through their own control tools,
+  only for the destination you chose: Notes shows a note for you to accept,
+  Mail opens a draft you send yourself, Pulse sends the message you shared to
+  the chat you picked. Files for Mail and Bluetooth are staged in a private
+  folder (0700) under their names, never moved, and removed afterwards.
+- QR codes are made locally and kept in the private runtime folder for an hour.
+- External providers never run inside the service. Each send runs the
+  provider's program in a bubblewrap sandbox with fresh namespaces, read-only
+  `/usr` and `/etc`, no home folder, no session bus or display, a cleared
+  environment, its own data folder, and no network unless its manifest asks
+  (the sheet then says so). It gets only that send's items, files as read-only
+  descriptors. Checked by a probe in `crates/nyx-share-external/tests/sandbox.rs`.
 
 ## Reporting
 

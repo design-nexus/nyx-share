@@ -29,7 +29,10 @@ fn main() -> glib::ExitCode {
         .application_id(id)
         .flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE | gio::ApplicationFlags::SEND_ENVIRONMENT)
         .build();
-    app.connect_startup(|_| theme::install());
+    app.connect_startup(|_| {
+        theme::install();
+        app::install_icons();
+    });
     app.connect_command_line(|app, cl| {
         let var = |name: &str| cl.getenv(name).map(|v| v.to_string()).filter(|v| !v.is_empty());
         match (var(ENV_REQUEST), var(ENV_INCOMING), var(ENV_TOKEN)) {

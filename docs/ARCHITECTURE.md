@@ -12,6 +12,8 @@ flowchart LR
   Providers --> LocalSend["Nearby devices and My computers: LocalSend over LAN and Tailscale"]
   Providers --> Nas["NAS folders: GVfs (SMB, SFTP, NFS)"]
   Providers --> Flux["Phones: fluxd socket"]
+  Providers --> Apps["Notes, Mail, Pulse: app control tools; Cloud: Cloud1; Bluetooth: obexd"]
+  Providers --> Ext["Extensions: bwrap sandbox, JSON lines"]
   Nas --> Secrets["Secret Service: NAS passwords"]
   Daemon --> Notify["org.freedesktop.Notifications"]
   Daemon --> Prefs["destinations.toml, nearby.toml, computers.toml, nas.toml"]
@@ -24,8 +26,10 @@ flowchart LR
 | `nyx-share-core` | Types and checks with no I/O: `ItemSpec`/`ItemInfo`, `Destination`, `Job`, request validation, filename sanitizing and conflict names, sizes, a small MIME table. |
 | `nyx-share-dbus` | Bus name, object path, zbus proxies for `Share1` and `ShareSheet1`, and the JSON wire types. |
 | `nyx-share-client` | The public blocking client: opens files read-only and sends descriptors, waits on jobs, streams events. zbus with its default async-io runtime; no GTK, no tokio. |
-| `nyx-share-providers` | The `Provider` trait and the built-in destinations. |
+| `nyx-share-providers` | The `Provider` trait, the built-in destinations (clipboard, Save to folder, QR code) and staging files for other programs. |
 | `nyx-share-localsend` | LocalSend v2: identity, TLS, discovery, Tailscale peers, sender, receiver, and the Nearby and My computers providers. |
+| `nyx-share-apps` | Nyx apps and system services as destinations: Notes, Mail and Pulse through the app control interface, Cloud through `Cloud1`, Bluetooth through obexd. |
+| `nyx-share-external` | Third-party providers: manifests, the bubblewrap sandbox, the JSON-lines protocol. |
 | `nyx-share-flux` | Phones and tablets paired in Flux: fluxd's socket protocol, staging files for it, following its transfers. |
 | `nyx-share-nas` | NAS folders: GVfs mounting with saved credentials, copying with partial files, and the Secret Service store for their passwords. |
 | `apps/daemon` | `nyx-share-daemon`: owns requests, jobs, providers and the destination arrangement. |

@@ -129,19 +129,23 @@ fn clear(b: &gtk::Box) {
     }
 }
 
-const ARROWS: [(&str, &str); 2] = [
+const ICONS: [(&str, &str); 3] = [
     ("nyx-share-up-symbolic", "M12 3.5l6.5 6.6-1.4 1.4-4.1-4.2V20h-2V7.3l-4.1 4.2-1.4-1.4z"),
     ("nyx-share-down-symbolic", "M12 20.5l-6.5-6.6 1.4-1.4 4.1 4.2V4h2v12.7l4.1-4.2 1.4 1.4z"),
+    (
+        "nyx-share-qr-symbolic",
+        "M3 3h8v8H3zm2 2v4h4V5zm8-2h8v8h-8zm2 2v4h4V5zM3 13h8v8H3zm2 2v4h4v-4zm1-9h2v2H6zm10 0h2v2h-2zM6 16h2v2H6zm7-3h3v3h-3zm3 3h2v2h-2zm2-3h3v2h-3zm-5 5h3v3h-3zm6 0h2v4h-4v-2h2z",
+    ),
 ];
 
-/// Arrow icons for Transfers, which the icon theme doesn't have. Filled paths:
-/// GTK fills every path of a symbolic icon.
-fn install_icons() {
+/// Icons the icon theme doesn't have (Transfers' arrows, the QR code). Filled
+/// paths, even-odd: GTK fills every path of a symbolic icon.
+pub(crate) fn install_icons() {
     let dir = nyx_core::paths::cache_dir().join("nyx-icons");
-    for (name, path) in ARROWS {
+    for (name, path) in ICONS {
         let file = dir.join(format!("{name}.svg"));
         let svg = format!(
-            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\"><path fill=\"#000000\" d=\"{path}\"/></svg>\n"
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\" viewBox=\"0 0 24 24\"><path fill=\"#000000\" fill-rule=\"evenodd\" d=\"{path}\"/></svg>\n"
         );
         if std::fs::read_to_string(&file).ok().as_deref() != Some(svg.as_str()) {
             let _ = nyx_core::cmd::atomic_write(&file, svg);
@@ -153,7 +157,6 @@ fn install_icons() {
 }
 
 fn build(app: &gtk::Application, client: Arc<Client>) {
-    install_icons();
     let (window, header, body) = sheet::window(app);
     // The same width on every page.
     window.set_size_request(560, -1);

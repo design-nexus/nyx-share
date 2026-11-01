@@ -29,6 +29,12 @@ fn main() -> anyhow::Result<()> {
     let nas_folders = Arc::new(std::sync::RwLock::new(nas::load()));
     providers.push(Arc::new(nyx_share_nas::NasProvider(nas_folders.clone())));
     providers.push(Arc::new(nyx_share_flux::FluxProvider::new(nyx_share_flux::socket_path())));
+    providers.push(Arc::new(nyx_share_apps::Mail::default()));
+    providers.push(Arc::new(nyx_share_apps::Notes::default()));
+    providers.push(Arc::new(nyx_share_apps::Cloud::default()));
+    providers.push(Arc::new(nyx_share_apps::Pulse::default()));
+    providers.push(Arc::new(nyx_share_apps::Bluetooth::default()));
+    providers.push(Arc::new(nyx_share_external::External::default()));
     let state = Arc::new(State::new(providers, config::load(), nas_folders));
     async_io::block_on(async {
         let conn = zbus::connection::Builder::session()?

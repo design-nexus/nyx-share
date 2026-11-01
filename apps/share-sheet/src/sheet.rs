@@ -56,6 +56,11 @@ struct Sheet {
     early: RefCell<HashMap<String, Job>>,
     show_hidden: Cell<bool>,
     closed: Cell<bool>,
+    body: gtk::Box,
+    header: nyx_ui::chrome::AppHeader,
+    back: gtk::Button,
+    /// The QR code page, while it is shown over the destinations.
+    qr: RefCell<Option<gtk::Box>>,
 }
 
 fn connect(request: String, token: String) -> Result<(Arc<Conn>, RequestInfo), String> {
@@ -159,6 +164,12 @@ fn build(app: &gtk::Application, conn: Arc<Conn>, info: RequestInfo) {
     transfers.append(&note);
     transfers.set_visible(false);
     body.append(&transfers);
+    let back = widgets::icon_button("go-previous-symbolic", "Back");
+    back.set_visible(false);
+    match header.subtitle.parent().and_downcast::<gtk::Box>() {
+        Some(title) => title.prepend(&back),
+        None => header.start.append(&back),
+    }
 
     let sheet = Rc::new(Sheet {
         window: window.clone(),
@@ -175,6 +186,16 @@ fn build(app: &gtk::Application, conn: Arc<Conn>, info: RequestInfo) {
         early: RefCell::default(),
         show_hidden: Cell::new(false),
         closed: Cell::new(false),
+        body,
+        header,
+        back: back.clone(),
+        qr: RefCell::default(),
+    });
+    let weak = Rc::downgrade(&sheet);
+    back.connect_clicked(move |_| {
+        if let Some(sheet) = weak.upgrade() {
+            sheet.hide_qr();
+        }
     });
     install_actions(&sheet);
     sheet.render();
@@ -632,7 +653,7 @@ impl Sheet {
             i.set_action_and_target_value(Some(&format!("dest.{action}")), Some(&id.to_variant()));
             i
         };
-        if d.provider == "nas" && d.available {
+        if matches!(d.provider.as_str(), "nas" | "cloud") && d.available {
             let send = gio::Menu::new();
             send.append_item(&item("Send to a subfolder…", "subfolder"));
             menu.append_section(None, &send);
@@ -663,6 +684,94 @@ impl Sheet {
             glib::idle_add_local_once(move || p.unparent());
         });
         popover.popup();
+    }
+
+    /// The QR code page, in place of the destinations, as in the mockup.
+    fn show_qr(self: &Rc<Self>, path: &std::path::Path) {
+        self.hide_qr();
+        let mut child = self.body.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            w.set_visible(false);
+        }
+        let page = widgets::vbox(10);
+        page.add_css_class("share-qr-page");
+        let frame = widgets::vbox(0);
+        frame.add_css_class("share-qr");
+        frame.set_halign(gtk::Align::Center);
+        // A fixed size: a Picture would ask for the image's own 640 pixels.
+        let code = match gdk::Texture::from_filename(path) {
+            Ok(texture) => gtk::Image::from_paintable(Some(&texture)),
+            Err(_) => gtk::Image::from_icon_name("image-missing-symbolic"),
+        };
+        code.set_pixel_size(208);
+        code.set_tooltip_text(Some("QR code"));
+        frame.append(&code);
+        page.append(&frame);
+        let item = self.info.borrow().items.first().cloned();
+        if let Some(item) = item {
+            let text = item.preview.clone().unwrap_or_else(|| item.name.clone());
+            let title = widgets::label(&first_line(&text), "share-qr-title");
+            title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+            title.set_max_width_chars(48);
+            title.set_halign(gtk::Align::Center);
+            page.append(&title);
+        }
+        let buttons = widgets::hbox(8);
+        buttons.set_halign(gtk::Align::Center);
+        let copy = gtk::Button::new();
+        copy.set_child(Some(&icon_label("edit-copy-symbolic", "Copy image")));
+        let file = path.to_path_buf();
+        let weak = Rc::downgrade(self);
+        copy.connect_clicked(move |b| {
+            let Some(sheet) = weak.upgrade() else { return };
+            match gdk::Texture::from_filename(&file) {
+                Ok(texture) => {
+                    b.clipboard().set_texture(&texture);
+                    b.set_child(Some(&icon_label("object-select-symbolic", "Copied")));
+                }
+                Err(e) => sheet.banner(&format!("Couldn't copy the image: {e}")),
+            }
+        });
+        let save = gtk::Button::new();
+        save.set_child(Some(&icon_label("document-save-symbolic", "Save image…")));
+        let file = path.to_path_buf();
+        let weak = Rc::downgrade(self);
+        save.connect_clicked(move |_| {
+            let Some(sheet) = weak.upgrade() else { return };
+            let dialog = gtk::FileDialog::builder().title("Save QR code").initial_name("QR code.png").modal(true).build();
+            let (file, window, weak) = (file.clone(), sheet.window.clone(), Rc::downgrade(&sheet));
+            glib::spawn_future_local(async move {
+                let Ok(target) = dialog.save_future(Some(&window)).await else { return };
+                let Some(target) = target.path() else { return };
+                if let Err(e) = std::fs::copy(&file, &target)
+                    && let Some(sheet) = weak.upgrade()
+                {
+                    sheet.banner(&format!("Couldn't save the image: {e}"));
+                }
+            });
+        });
+        buttons.append(&copy);
+        buttons.append(&save);
+        page.append(&buttons);
+        self.body.append(&page);
+        self.header.set_subtitle("QR code");
+        self.back.set_visible(true);
+        *self.qr.borrow_mut() = Some(page);
+        copy.grab_focus();
+    }
+
+    fn hide_qr(&self) {
+        let Some(page) = self.qr.borrow_mut().take() else { return };
+        self.body.remove(&page);
+        let mut child = self.body.first_child();
+        while let Some(w) = child {
+            child = w.next_sibling();
+            w.set_visible(true);
+        }
+        self.transfers.set_visible(!self.jobs.borrow().is_empty());
+        self.header.set_subtitle(&summary(&self.info.borrow()).2);
+        self.back.set_visible(false);
     }
 
     /// Send to a folder under a NAS folder, made if it doesn't exist.
@@ -974,6 +1083,12 @@ impl Sheet {
         let all_done = jobs.iter().all(|(_, r)| r.finished);
         drop(jobs);
         self.note.set_visible(running);
+        if job.state == JobState::Completed
+            && d.provider == "qr"
+            && let Some(path) = job.outputs.first()
+        {
+            self.show_qr(std::path::Path::new(path));
+        }
         // A copy is instant and has nothing more to show: close like a menu would.
         if job.state == JobState::Completed && d.provider == "clipboard" && all_done {
             let window = self.window.downgrade();
@@ -1109,6 +1224,13 @@ fn job_caption(job: &Job, started: Instant) -> String {
         }
         _ => String::new(),
     }
+}
+
+fn icon_label(icon: &str, text: &str) -> gtk::Box {
+    let b = widgets::hbox(6);
+    b.append(&gtk::Image::from_icon_name(icon));
+    b.append(&gtk::Label::new(Some(text)));
+    b
 }
 
 #[cfg(test)]

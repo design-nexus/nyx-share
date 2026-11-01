@@ -17,6 +17,12 @@ cloud service, account or relay.
 | Nearby devices | Files, images, text and links | Phones, tablets and computers running LocalSend on your network, over encrypted connections pinned to each device's key. |
 | My computers | Files, images, text and links | Computers you saved, reached over the LAN or Tailscale (LAN first), known by their device key rather than their address. Ones you trust can send to you without asking. |
 | Phones in Flux | Files, images, text and links | Phones and tablets paired in [Flux](https://github.com/bjarneo/flux); files for an offline phone wait in Flux. See [FLUX.md](docs/FLUX.md). |
+| QR code | One text or link | Shown in the Share Sheet, to scan with a phone; Copy image and Save image. |
+| Mail, Notes | Text and links; Mail also files | A new message in Nyx Mail for you to address and send, or a new note Nyx Notes shows for you to accept. |
+| Cloud accounts | Files, images and text | Copied into a Nyx Cloud account's folder; it uploads in the background. |
+| Telegram | Text and links | Your recent chats in Nyx Pulse, while Pulse is open. Sends at once. |
+| Bluetooth | Files, images and text | Paired devices that take files (Object Push), with `bluez-obex` installed. |
+| Extensions | As each declares | Third-party providers, each run in a sandbox with only what you share; see [PROVIDERS.md](docs/PROVIDERS.md). |
 | NAS folders | Files, images and text | A folder on an SMB, SFTP or NFS share, through GVfs like Nyx Files. Copies only; passwords stay in your keyring. See [NAS.md](docs/NAS.md). |
 
 While the service runs (when you share, and for a minute after), this computer
@@ -26,7 +32,7 @@ Downloads folder. See [LOCALSEND.md](docs/LOCALSEND.md).
 
 Transfers run in the service, so closing the Share Sheet doesn't stop them, and
 the service notifies you when one finishes after the sheet has closed. Phones
-through SMS and Nyx app destinations are planned; see
+through SMS and Nyx Assistant are planned; see
 [the roadmap](docs/ROADMAP.md). Nothing in the sheet appears for a destination
 that doesn't exist yet.
 

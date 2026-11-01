@@ -31,18 +31,69 @@ plus any outputs. A destination declares the kinds it takes, an optional
 | `computers` | `computer:<id>` (each saved computer) | text, url, image, file | Always listed, with LAN, Tailscale or Offline as status. Sending re-checks the routes in order and pins the saved key. |
 | `flux` | `flux:<id>` (each device paired in Flux) | text, url, image, file; 100 | Through fluxd's socket: `share.url`, `share.text`, `share.files` with staged files, progress from its transfers; see [FLUX.md](FLUX.md). |
 | `nas` | `nas:<id>` (each NAS folder) | text, image, file | GVfs copy with partial files and no replacing; `subfolder` option; see [NAS.md](NAS.md). |
+| `qr` | `qr` ("QR code") | text, url; 1 item | Makes a QR code here (UTF-8 marked with ECI when needed, at most 1,200 bytes) as a PNG in `$XDG_RUNTIME_DIR/nyx-share/qr`, removed after an hour. The Share Sheet shows it with Copy image and Save image. |
+| `notes` | `notes` ("Notes") | text, url; 1 item | Nyx Notes' `notes.vault_create`, or `notes.clip` for a web link: Notes shows the new note for you to accept, and the job reports what you decided. Starts Notes if needed; needs a vault open and "proposed edits" allowed in Notes. |
+| `mail` | `mail` ("Mail") | text, url, image, file; 20 | Nyx Mail's `mail.draft`: a new message with the texts and links as its body and the files attached (staged in `$XDG_CACHE_HOME/nyx-share/mail`, read by Mail, then removed; 25 MB each). Mail opens it for you to address and send. |
+| `cloud` | `cloud:<id>` (each Nyx Cloud account with storage on) | text, image, file | Asks Nyx Cloud (`Cloud1`) to mount the account if it isn't, then copies into its folder like Save to folder; rclone uploads in the background. `subfolder` option. |
+| `pulse` | `pulse:<chat>` (your six most recent Telegram chats) | text, url; 1 item | Nyx Pulse's `pulse.messages.send`, which sends at once. Listed only while Pulse is open; chats without a name are left out. |
+| `bluetooth` | `bluetooth:<address>` (each paired device with Object Push) | text, image, file | BlueZ's obexd (`bluez-obex`): an OBEX Object Push session, one `SendFile` per item (staged; texts as `.txt`), progress from the transfer's signals, Cancel. The device asks its user to accept. Unavailable without obexd. |
+| `external` | `ext:<id>` (each installed extension) | as its manifest says | A separate program in a sandbox; see below. |
 
-## Planned
+Notes, Mail and Pulse are reached through the control interface every Nyx app
+serves for Nyx Assistant (`io.github.design_nexus.nyx.Control`,
+`Call(name, arguments)`), as the user's explicit choice in the sheet.
 
-SMS through Flux, Nyx Mail, Nyx Cloud, Nyx Pulse, Bluetooth,
-QR code, Nyx Notes and Nyx Assistant; see [ROADMAP.md](ROADMAP.md).
+## Not done
 
-## External providers (design, not implemented)
+SMS through Flux, and Nyx Assistant: Assistant has no way yet to receive shared
+content into a conversation.
 
-Third-party providers will never load into the daemon. They will run as separate
-processes described by a manifest (`~/.local/share/nyx-share/providers/<id>.toml`
-with `exec`, `kinds`, `max_items` and the permissions it needs) and speak
-newline-delimited JSON over stdin/stdout, like Nyx Files' providers. The service
-will pass only the items of a job the user chose for that provider, as
-descriptors, and refuse requests outside the declared permissions. The manifest
-format will be published here before the first external provider ships.
+## External providers
+
+Third-party providers never load into the service. Each is a folder,
+`~/.local/share/nyx-share/providers/<id>/`, with a manifest and a program:
+
+```toml
+id = "word-count"            # the folder's name: lowercase letters, digits, dashes
+name = "Word count"
+exec = "word-count"          # an executable inside the folder
+kinds = ["text", "url", "file"]   # text, url, image, file
+max_items = 20               # optional
+icon = "accessories-text-editor-symbolic"   # optional, a symbolic icon name
+[permissions]
+network = false              # the default
+```
+
+A manifest with unknown keys, a program outside its folder or unknown kinds is
+skipped (the service logs why). Each send runs the program under bubblewrap
+(`bwrap`), which must be installed:
+
+- new user, PID, IPC, UTS, cgroup and network namespaces; the network is shared
+  only with `network = true`, and the sheet then says "uses the network";
+- `/usr` and `/etc` read-only, a fresh `/tmp`, `/run`, `/proc` and `/dev`, the
+  provider's folder read-only at `/provider`, and its own writable folder
+  (`~/.local/share/nyx-share/provider-data/<id>`) at `/data`, which is `HOME`;
+- nothing else of the user's: no home folder, no session bus, no display, a
+  cleared environment;
+- the items of that one send, and nothing more: texts in the request, files as
+  open read-only descriptors (3, 4, …).
+
+The program reads one line on stdin and answers in lines on stdout:
+
+```json
+{"version": 1, "method": "send", "items": [
+  {"kind": "text", "name": "Shared text", "text": "Hello"},
+  {"kind": "file", "name": "report.pdf", "mime": "application/pdf", "size": 2048, "fd": 3}
+]}
+```
+
+```json
+{"step": "Uploading"}
+{"progress": 2048}
+{"done": {"message": "Uploaded report.pdf"}}
+```
+
+or `{"error": "a sentence for the user"}`. Messages are cut to 300 characters.
+Cancelling the job kills the sandbox. `examples/providers/word-count` is a
+complete example; `crates/nyx-share-external/tests/sandbox.rs` runs a probe in
+the real sandbox and checks what it can and can't reach.

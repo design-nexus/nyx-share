@@ -1,0 +1,22 @@
+#!/bin/bash
+# Reads one request line: {"version":1,"method":"send","items":[…]}. Text items
+# carry "text"; files arrive as open descriptors ("fd"). Answers in JSON lines:
+# {"step": "…"}, {"progress": BYTES}, then {"done": {"message": "…"}} or {"error": "…"}.
+read -r request
+command -v python3 >/dev/null || { echo '{"error": "This example needs python3"}'; exit 0; }
+exec python3 -c '
+import json, os, sys
+request = json.loads(sys.argv[1])
+words = 0
+print(json.dumps({"step": "Counting"}), flush=True)
+for item in request["items"]:
+    if "text" in item:
+        data = item["text"]
+    else:
+        with os.fdopen(item["fd"], "rb") as f:
+            data = f.read().decode("utf-8", "replace")
+    words += len(data.split())
+    print(json.dumps({"progress": len(data.encode())}), flush=True)
+noun = "word" if words == 1 else "words"
+print(json.dumps({"done": {"message": f"{words:,} {noun}"}}), flush=True)
+' "$request"

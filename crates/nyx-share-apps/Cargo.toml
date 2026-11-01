@@ -1,0 +1,15 @@
+[package]
+name = "nyx-share-apps"
+description = "Nyx apps as Nyx Share destinations: Notes, Mail, Pulse and Cloud, through their own interfaces"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+nyx-share-core.workspace = true
+nyx-share-providers.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zbus = { workspace = true, features = ["blocking-api"] }

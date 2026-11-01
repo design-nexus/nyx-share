@@ -10,3 +10,6 @@ repository.workspace = true
 [dependencies]
 nyx-share-core.workspace = true
 libc.workspace = true
+qrcode = { version = "0.14", default-features = false }
+png = "0.18"
+uuid.workspace = true

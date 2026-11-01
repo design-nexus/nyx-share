@@ -1,0 +1,16 @@
+[package]
+name = "nyx-share-external"
+description = "Third-party Nyx Share providers, run as separate sandboxed processes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+nyx-share-core.workspace = true
+nyx-share-providers.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+libc.workspace = true

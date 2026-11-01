@@ -80,10 +80,12 @@ fn reports_version_and_destinations() {
     assert!(!clipboard.available, "no Wayland in the test session");
     let all = client.destinations(&[], 0).unwrap();
     assert!(all.iter().any(|d| d.id == "save"));
-    let for_files = client.destinations(&[ContentKind::File], 3).unwrap();
-    assert_eq!(for_files.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["save"]);
-    let for_link = client.destinations(&[ContentKind::Url], 1).unwrap();
-    assert_eq!(for_link.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["clipboard"]);
+    // What else is offered depends on the machine (Mail, Notes, Bluetooth devices).
+    let ids = |list: Vec<nyx_share_client::Destination>| list.into_iter().map(|d| d.id).collect::<Vec<_>>();
+    let for_files = ids(client.destinations(&[ContentKind::File], 3).unwrap());
+    assert!(for_files.contains(&"save".into()) && !for_files.iter().any(|d| d == "clipboard" || d == "qr"), "{for_files:?}");
+    let for_link = ids(client.destinations(&[ContentKind::Url], 1).unwrap());
+    assert!(for_link.contains(&"clipboard".into()) && for_link.contains(&"qr".into()) && !for_link.contains(&"save".into()), "{for_link:?}");
 }
 
 #[test]
