@@ -634,8 +634,9 @@ impl App {
             text.set_valign(gtk::Align::Center);
             let t = widgets::label("Drop files to send", "preview-title");
             t.set_xalign(0.0);
-            let s = widgets::label("Or choose files or text, then a device.", "preview-subtitle");
+            let s = widgets::label("Or choose here.", "preview-subtitle");
             s.set_xalign(0.0);
+            s.set_ellipsize(gtk::pango::EllipsizeMode::End);
             text.append(&t);
             text.append(&s);
             self.tray.append(&text);
@@ -645,6 +646,14 @@ impl App {
             files.connect_clicked(move |_| {
                 if let Some(app) = weak.upgrade() {
                     app.choose_files();
+                }
+            });
+            let folder = widgets::labeled_button("folder-open-symbolic", "Folder…");
+            folder.set_valign(gtk::Align::Center);
+            let weak = Rc::downgrade(self);
+            folder.connect_clicked(move |_| {
+                if let Some(app) = weak.upgrade() {
+                    app.choose_folders();
                 }
             });
             let text_button = widgets::labeled_button("format-justify-left-symbolic", "Text…");
@@ -661,6 +670,7 @@ impl App {
                 });
             });
             self.tray.append(&files);
+            self.tray.append(&folder);
             self.tray.append(&text_button);
             return;
         }
@@ -706,7 +716,13 @@ impl App {
                 |i| if let Chosen::File(p) = i { p.metadata().ok().filter(|m| m.is_file()).map(|m| m.len()) } else { None },
             )
             .sum();
-        let count = if items.len() == 1 { "1 item".to_string() } else { format!("{} items", items.len()) };
+        let folders = items.iter().filter(|i| matches!(i, Chosen::File(p) if p.is_dir())).count();
+        let plural = |n: usize, one: &str, many: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {many}") };
+        let count = match (items.len() - folders, folders) {
+            (_, 0) => plural(items.len(), "item", "items"),
+            (0, n) => plural(n, "folder", "folders"),
+            (n, f) => format!("{}, {}", plural(n, "item", "items"), plural(f, "folder", "folders")),
+        };
         let sub = if size > 0 { format!("{count} · {}", units::size(size)) } else { count };
         let s = widgets::label(&sub, "preview-subtitle");
         s.set_xalign(0.0);
@@ -720,6 +736,13 @@ impl App {
                 app.choose_files();
             }
         });
+        let add_folder = widgets::icon_button("folder-open-symbolic", "Add a folder");
+        let weak = Rc::downgrade(self);
+        add_folder.connect_clicked(move |_| {
+            if let Some(app) = weak.upgrade() {
+                app.choose_folders();
+            }
+        });
         let clear_button = widgets::icon_button("window-close-symbolic", "Clear");
         let weak = Rc::downgrade(self);
         clear_button.connect_clicked(move |_| {
@@ -730,6 +753,7 @@ impl App {
             }
         });
         self.tray.append(&add);
+        self.tray.append(&add_folder);
         self.tray.append(&clear_button);
     }
 
@@ -739,6 +763,20 @@ impl App {
         let window = self.window.clone();
         glib::spawn_future_local(async move {
             let Ok(model) = dialog.open_multiple_future(Some(&window)).await else { return };
+            let Some(app) = weak.upgrade() else { return };
+            let paths =
+                (0..model.n_items()).filter_map(|i| model.item(i).and_downcast::<gio::File>()).filter_map(|f| f.path()).collect();
+            app.add_files(paths);
+        });
+    }
+
+    /// Folders are shared as their files, keeping the layout where the device can.
+    fn choose_folders(self: &Rc<Self>) {
+        let dialog = gtk::FileDialog::builder().title("Choose folders to send").accept_label("Choose").modal(true).build();
+        let weak = Rc::downgrade(self);
+        let window = self.window.clone();
+        glib::spawn_future_local(async move {
+            let Ok(model) = dialog.select_multiple_folders_future(Some(&window)).await else { return };
             let Some(app) = weak.upgrade() else { return };
             let paths =
                 (0..model.n_items()).filter_map(|i| model.item(i).and_downcast::<gio::File>()).filter_map(|f| f.path()).collect();
