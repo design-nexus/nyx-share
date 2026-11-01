@@ -10,7 +10,7 @@ pub mod names;
 pub mod units;
 
 pub use content::{ContentError, ContentKind, ItemInfo, ItemSpec, Limits, kinds_of, validate};
-pub use destination::{Destination, Preferences, PreferencesUpdate, Section, arrange};
+pub use destination::{Destination, Preferences, PreferencesUpdate, Recipient, Section, arrange};
 pub use devices::LinkedDevice;
 pub use job::{Direction, Job, JobState, summarize};
 

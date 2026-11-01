@@ -35,6 +35,7 @@ impl Provider for Folder {
             kinds: self.kinds(),
             max_items: None,
             needs_folder: true,
+            needs_recipient: false,
             available: true,
             status: None,
             pinned: false,

@@ -466,3 +466,16 @@ fn walk(dir: &Path) -> Vec<String> {
     }
     out
 }
+
+#[test]
+#[ignore]
+fn checks_recipients_before_anything_is_sent() {
+    let client = Client::connect().unwrap();
+    let mut content = Content::new();
+    content.text("hi");
+    for bad in ["; rm -rf ~", "12", "+1 555 +0100", "0123456789012345678901"] {
+        let options = ShareOptions { recipient: Some(bad.into()), ..Default::default() };
+        refused(client.share_to("qr", &content, &options), "isn't a phone number");
+    }
+    assert!(client.recipients("qr").unwrap().is_empty(), "only destinations that text suggest anyone");
+}

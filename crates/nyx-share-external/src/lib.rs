@@ -250,6 +250,7 @@ impl Provider for External {
                 kinds: p.kinds.clone(),
                 max_items: p.max_items,
                 needs_folder: false,
+                needs_recipient: false,
                 available: sandboxed,
                 status: Some(match (sandboxed, p.network) {
                     (false, _) => "Needs bubblewrap (bwrap)".into(),

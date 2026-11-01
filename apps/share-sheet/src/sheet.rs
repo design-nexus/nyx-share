@@ -419,6 +419,7 @@ impl Sheet {
             let Some(d) = self.destination(id) else { continue };
             let options = match (folder, sub) {
                 (Some(f), _) => serde_json::json!({ "folder": f }),
+                (None, Some(s)) if d.needs_recipient => serde_json::json!({ "recipient": s }),
                 (None, Some(s)) => serde_json::json!({ "subfolder": s }),
                 (None, None) => serde_json::json!({}),
             };
@@ -428,8 +429,8 @@ impl Sheet {
 
     /// For checks: `NYX_SHARE_CHECK_STEPS=focus:save;up;menu:clipboard;pin:save` runs
     /// one step every 1.5 s: focus a tile, move like the arrow keys (`up`, `down`,
-    /// `left`, `right`, through GTK's own cursor movement), open a tile's menu, or
-    /// run a menu action (`pin`, `hide`, `left`, `right`). Each step logs where
+    /// `left`, `right`, through GTK's own cursor movement), open a tile's menu,
+    /// choose a tile as if clicked (`open:ID`), or run a menu action (`pin`, `hide`, `left`, `right`). Each step logs where
     /// the focus is and the order of the tiles.
     fn check_steps(self: &Rc<Self>) {
         let Ok(steps) = std::env::var("NYX_SHARE_CHECK_STEPS") else { return };
@@ -472,6 +473,7 @@ impl Sheet {
                     self.menu_for(&flow, &child);
                 }
             }
+            ("open", id) => self.activate(id),
             ("up" | "down" | "left" | "right", "") => {
                 let Some(flow) = focused_flow() else { return };
                 let (step, count) = match name {
@@ -802,6 +804,50 @@ impl Sheet {
         );
     }
 
+    /// Who to text: a number, or one of the recent conversations.
+    fn ask_recipient(self: &Rc<Self>, d: Destination) {
+        let conn = self.conn.clone();
+        let weak = Rc::downgrade(self);
+        let id = d.id.clone();
+        nyx_core::cmd::background(
+            move || conn.client.recipients(&id).unwrap_or_default(),
+            move |recent: Vec<nyx_share_core::Recipient>| {
+                let Some(sheet) = weak.upgrade() else { return };
+                let from = d.status.clone().unwrap_or_default();
+                let send = {
+                    let (weak, d) = (Rc::downgrade(&sheet), d.clone());
+                    move |to: String| {
+                        if let Some(sheet) = weak.upgrade() {
+                            sheet.send(d.clone(), serde_json::json!({ "recipient": to }).to_string());
+                        }
+                    }
+                };
+                let send = Rc::new(send);
+                let s = send.clone();
+                let extra =
+                    widgets::ask_text("Text message", &format!("{from}. Type a phone number."), "", "Send", move |to| s(to));
+                if recent.is_empty() {
+                    return;
+                }
+                extra.append(&widgets::label("Recent", "dim"));
+                for r in recent.into_iter().take(6) {
+                    let label = if r.name == r.address { r.address.clone() } else { format!("{} · {}", r.name, r.address) };
+                    let b = gtk::Button::with_label(&label);
+                    b.set_halign(gtk::Align::Start);
+                    b.add_css_class("flat");
+                    let send = send.clone();
+                    b.connect_clicked(move |b| {
+                        if let Some(w) = b.root().and_downcast::<gtk::Window>() {
+                            w.close();
+                        }
+                        send(r.address.clone());
+                    });
+                    extra.append(&b);
+                }
+            },
+        );
+    }
+
     /// Pin, hide or move a destination, then show the new arrangement.
     fn arrange(self: &Rc<Self>, action: &str, id: &str) {
         let neighbour = {
@@ -912,6 +958,8 @@ impl Sheet {
         self.banner("");
         if d.needs_folder {
             self.choose_folder(d);
+        } else if d.needs_recipient {
+            self.ask_recipient(d);
         } else {
             self.send(d, "{}".into());
         }
@@ -1183,8 +1231,13 @@ fn job_title(job: &Job, d: &Destination, options: &str) -> String {
         JobState::Cancelled => "Cancelled".into(),
         JobState::Queued | JobState::Running => {
             let what = if job.items == 1 { "1 item".to_string() } else { format!("{} items", job.items) };
+            let recipient: Option<String> = serde_json::from_str::<serde_json::Value>(options)
+                .ok()
+                .and_then(|v| v.get("recipient").and_then(|f| f.as_str()).map(str::to_string));
             if d.provider == "clipboard" {
                 "Copying".into()
+            } else if let Some(to) = recipient {
+                format!("Texting {to}")
             } else if d.needs_folder {
                 let folder: Option<String> = serde_json::from_str::<serde_json::Value>(options)
                     .ok()

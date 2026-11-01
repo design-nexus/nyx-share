@@ -255,6 +255,7 @@ impl Provider for ComputersProvider {
                     kinds: self.kinds(),
                     max_items: None,
                     needs_folder: false,
+                    needs_recipient: false,
                     // Offline is a hint: sending checks again, and says why if it fails.
                     available: true,
                     status: Some(

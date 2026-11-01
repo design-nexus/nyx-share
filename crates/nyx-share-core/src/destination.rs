@@ -31,6 +31,10 @@ pub struct Destination {
     /// The Share Sheet asks for a folder before sending.
     #[serde(default)]
     pub needs_folder: bool,
+    /// The Share Sheet asks who to send to (a phone number for a text message),
+    /// suggesting `ListRecipients`.
+    #[serde(default)]
+    pub needs_recipient: bool,
     pub available: bool,
     /// How it is reached ("LAN", "Tailscale") or why it can't be used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -138,6 +142,13 @@ pub fn arrange(mut dests: Vec<Destination>, prefs: &Preferences) -> Vec<Destinat
     dests
 }
 
+/// Someone a destination can send to, such as a recent text conversation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Recipient {
+    pub name: String,
+    pub address: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,6 +165,7 @@ mod tests {
             kinds: kinds.to_vec(),
             max_items: max,
             needs_folder: false,
+            needs_recipient: false,
             available: true,
             status: None,
             pinned: false,

@@ -23,6 +23,7 @@ nyx-share --nas "NAS Documents" --subfolder Reports/2026 report.pdf
 | `--device NAME` | Send to a saved computer or nearby device, by name. |
 | `--nas NAME` | Send to a NAS folder, by name. |
 | `--subfolder PATH` | With `--nas` (or a cloud account): into this folder under it, made if missing. |
+| `--recipient NUMBER` | With a text message destination (`flux-sms:…`): the phone number to text. |
 | `--folder DIR` | The folder for `--to save`. |
 | `--no-wait` | Print the job id and return instead of waiting. |
 

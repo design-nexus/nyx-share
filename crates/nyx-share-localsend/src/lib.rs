@@ -361,6 +361,7 @@ impl Provider for NearbyProvider {
                     kinds: self.kinds(),
                     max_items: None,
                     needs_folder: false,
+                    needs_recipient: false,
                     available: encrypted,
                     status: Some(match (encrypted, tailnet::is_tailscale(&p.addr)) {
                         (false, _) => "Encryption is off on that device".into(),

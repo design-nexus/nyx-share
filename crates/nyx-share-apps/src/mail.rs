@@ -60,6 +60,7 @@ impl Provider for Mail {
             kinds: self.kinds(),
             max_items: Some(MAX_FILES),
             needs_folder: false,
+            needs_recipient: false,
             available: true,
             status: None,
             pinned: false,

@@ -19,6 +19,7 @@ Checked against Flux 0.19.1:
 | `share.text` | Text, and links with other schemes. At most 256 KiB. |
 | `share.files` | Files and images, as absolute paths. Flux copies each into its outbox before it answers, and returns transfer ids. |
 | `transfer.cancel` | Cancelling a job. |
+| `sms.send` | A text message through the phone, to one number. Each device's `conversations` (`name`, `address`, `addresses`) in `state` give the suggestions. |
 
 Errors come back with a code and a sentence (`offline`, `not_paired`,
 `too_large`, …); Share shows the sentence.
@@ -40,19 +41,26 @@ Errors come back with a code and a sentence (`offline`, `not_paired`,
   "Waiting in Flux: 1 file goes when Pandora is back" instead of keeping Share
   running.
 - At most 100 items per share, Flux's outbox limit.
+- A shared folder's files go one by one, under their own names ("a (2).jpg"
+  when two subfolders hold an a.jpg).
+- **Text message** (`flux-sms:<device>`, under Apps & services): for a paired
+  phone with the **sms** plugin, while it is connected. It takes text and links
+  (up to 5, joined by new lines, at most 2000 characters). The Share Sheet asks
+  for the number and suggests recent one-to-one conversations
+  (`ListRecipients`, which sandboxed apps can't call). The job completes when
+  the phone has the request ("Pandora is texting Kari"); Flux for Android
+  texts one number at a time.
 
 ## Not done
 
-- SMS (`sms.send`): no destination yet; it would need the phone's Text messages
-  plugin.
-- A phone reachable through both Flux and LocalSend shows twice. Merging them
-  needs an explicit link made by you, never a match by name.
-- Folders (Flux would zip them) aren't offered, like every destination.
+- A phone reachable through both Flux and LocalSend shows twice until you link
+  them in Settings → Sharing → Linked devices. Names are only a suggestion.
 
 ## Checked
 
 With a fake fluxd in the crate's tests (listing, links, text, files with name
 clashes, an offline phone, a failed transfer, cancelling a running transfer,
-the copy fallback), and with Flux 0.19.1 and a paired Android phone: Flux took
+the copy fallback, text messages with suggestions and an offline phone; in the
+Share Sheet on a test display, picking a recent conversation), and with Flux 0.19.1 and a paired Android phone: Flux took
 a link and a text and reported the file delivered, and the staging folder was
 gone afterwards.

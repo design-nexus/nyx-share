@@ -42,6 +42,8 @@ pub struct SendOptions {
     pub folder: Option<PathBuf>,
     /// A folder under the destination's own (a NAS folder's), for this send only.
     pub subfolder: Option<String>,
+    /// Who to send to, for a destination that needs one (a phone number).
+    pub recipient: Option<String>,
 }
 
 /// A job as a provider sees it.
@@ -87,6 +89,10 @@ pub trait Provider: Send + Sync {
     /// The destinations it offers now, with their availability.
     fn destinations(&self) -> Vec<Destination>;
     fn send(&self, destination: &str, task: &Task<'_>) -> Result<Outcome, SendError>;
+    /// Suggestions for a destination that needs a recipient, most recent first.
+    fn recipients(&self, _destination: &str) -> Vec<nyx_share_core::Recipient> {
+        Vec::new()
+    }
 }
 
 /// The providers in this release.

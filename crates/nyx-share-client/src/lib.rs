@@ -256,6 +256,12 @@ impl Client {
         json(&self.proxy.get_preferences()?)
     }
 
+    /// Suggested recipients for a destination that needs one (recent text
+    /// conversations). Refused for sandboxed callers.
+    pub fn recipients(&self, destination: &str) -> Result<Vec<nyx_share_core::Recipient>, Error> {
+        json(&self.proxy.list_recipients(destination)?)
+    }
+
     /// Linked devices, suggestions and the linkable routes present now (JSON).
     pub fn devices(&self) -> Result<serde_json::Value, Error> {
         json(&self.proxy.list_devices()?)

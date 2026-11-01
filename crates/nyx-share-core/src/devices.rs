@@ -6,8 +6,13 @@ use crate::{ContentKind, Destination, Section};
 use serde::{Deserialize, Serialize};
 
 pub const PREFIX: &str = "device:";
-/// Providers whose destinations are devices that can be linked.
-pub const LINKABLE: [&str; 4] = ["computers", "flux", "bluetooth", "localsend"];
+/// Destinations that are devices and can be linked, by id.
+const LINKABLE: [&str; 4] = ["computer:", "flux:", "bluetooth:", "localsend:"];
+
+/// A destination that is a device which can be linked.
+pub fn linkable(d: &Destination) -> bool {
+    LINKABLE.iter().any(|p| d.id.starts_with(p))
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -26,8 +31,7 @@ impl LinkedDevice {
         if self.routes.len() < 2 || self.routes.len() > 6 {
             return Err("Link two to six ways of reaching the device".into());
         }
-        let linkable = ["computer:", "flux:", "bluetooth:", "localsend:"];
-        if let Some(bad) = self.routes.iter().find(|r| !linkable.iter().any(|p| r.starts_with(p)) || r.len() > 512) {
+        if let Some(bad) = self.routes.iter().find(|r| !LINKABLE.iter().any(|p| r.starts_with(p)) || r.len() > 512) {
             return Err(format!("{bad} isn't a device that can be linked"));
         }
         Ok(())
@@ -66,6 +70,7 @@ pub fn link(dests: Vec<Destination>, devices: &[LinkedDevice]) -> Vec<Destinatio
                 members.iter().filter_map(|d| d.max_items).max()
             },
             needs_folder: false,
+            needs_recipient: false,
             available: members.iter().any(|d| d.available),
             status: Some(if names.is_empty() { "Offline".into() } else { names.join(" · ") }),
             pinned: false,
@@ -116,7 +121,7 @@ pub fn routes_for<'a>(
 pub fn suggestions(dests: &[Destination], devices: &[LinkedDevice]) -> Vec<(String, Vec<String>)> {
     let linked: Vec<&String> = devices.iter().flat_map(|d| d.routes.iter()).collect();
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
-    for d in dests.iter().filter(|d| LINKABLE.contains(&d.provider.as_str()) && !linked.contains(&&d.id)) {
+    for d in dests.iter().filter(|d| linkable(d) && !linked.contains(&&d.id)) {
         let key = d.name.trim().to_lowercase();
         match groups.iter_mut().find(|(name, _)| name.trim().to_lowercase() == key) {
             Some((_, ids)) => ids.push(d.id.clone()),
@@ -142,6 +147,7 @@ mod tests {
             kinds: kinds.to_vec(),
             max_items: None,
             needs_folder: false,
+            needs_recipient: false,
             available: true,
             status: Some(status.into()),
             pinned: false,

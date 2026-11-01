@@ -54,6 +54,8 @@ pub trait Share {
 
     fn list_devices(&self) -> zbus::Result<String>;
 
+    fn list_recipients(&self, destination: &str) -> zbus::Result<String>;
+
     fn save_device(&self, device: &str) -> zbus::Result<String>;
 
     fn remove_device(&self, id: &str) -> zbus::Result<()>;
@@ -286,6 +288,10 @@ pub struct ShareOptions {
     /// A folder under a NAS destination's own, for this send (`2026/Trips`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subfolder: Option<String>,
+    /// Who to send to, for a destination with `needs_recipient`: a phone
+    /// number. Refused from sandboxed callers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,
     /// Notify when the job finishes (default true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notify: Option<bool>,

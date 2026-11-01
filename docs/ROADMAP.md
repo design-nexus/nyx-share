@@ -20,8 +20,7 @@
 
 Still open:
 
-- Nyx Assistant as a destination (it needs a way to receive content), and SMS
-  through Flux.
+- Nyx Assistant as a destination (it needs a way to receive content).
 - Choosing a folder from the Share window's add button (folders can be
   dropped on it, or shared from apps, Files and the command line).
 - A freedesktop sharing portal, as an upstream proposal ([PORTAL.md](PORTAL.md)).

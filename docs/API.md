@@ -21,6 +21,7 @@ version; anything else gets `Share2`.
 | `GetPreferences` | `() → s` | The same fields as JSON, with the history limit in effect. |
 | `RetryJob` | `(s id) → s` | Run a failed job again as a new job (its id); possible while `retryable` is true (30 minutes, the last 20 failures). Not for sandboxed callers. |
 | `ClearHistory` | `() → ()` | Forget finished transfers. Not for sandboxed callers. |
+| `ListRecipients` | `(s destination) → s` | Suggested recipients for a destination with `needs_recipient`, most recent first: `[{name,address}]`. Not for sandboxed callers. |
 | `ListDevices` | `() → s` | Linked devices as JSON: `{"devices":[{id,name,routes}],"suggestions":[{name,routes}],"routes":[{id,name,provider,status}]}`. `routes` lists every linkable destination present now (saved computers, Flux, Bluetooth, LocalSend); `suggestions` groups unlinked ones with the same name, for the user to confirm. |
 | `SaveDevice` | `(s device) → s` | Link two to six routes into one device (`{id,name,routes}`, empty `id` adds one); returns the id. A route belongs to one device, so it leaves any other. |
 | `RemoveDevice` | `(s id) → ()` | Unlink a device; its routes are listed on their own again. |
@@ -85,6 +86,10 @@ by index:
 - `notify`: notify when a `ShareTo` job finishes (default `true`).
 - `notify_after`: with `notify`, only if the job took at least this many
   seconds; for callers that show a quick result themselves.
+- `recipient`: for a destination with `needs_recipient` (a text message), the
+  phone number: digits, an optional leading `+`, and spaces, dashes, dots or
+  parentheses. Refused from sandboxed callers, who use `Share` so the user
+  picks.
 
 ## Destinations and jobs
 
@@ -96,7 +101,9 @@ by index:
 
 `section` is `devices`, `nearby` or `apps`; `max_items` limits a share (the
 clipboard takes 1); `status` says how a destination is reached or why it isn't
-available.
+available. `needs_folder` and `needs_recipient` mean the Share Sheet asks for a
+folder or a phone number before sending; `default` marks the one Settings made
+the default.
 
 ```json
 {"id": "…", "destination": "save", "destination_name": "Save to folder", "state": "completed",

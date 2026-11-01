@@ -18,6 +18,8 @@ struct Fake {
     finish_after: Option<usize>,
     fail: bool,
     states: usize,
+    /// The phone texts for this computer, with two recent conversations.
+    sms: bool,
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -54,7 +56,14 @@ fn serve(dir: &Path, fake: Arc<StdMutex<Fake>>) -> PathBuf {
                             let transfers: Vec<Value> = (0..f.received.len())
                                 .map(|i| json!({ "id": format!("t{i}"), "state": state, "done": if state == "done" { 5 } else { 2 }, "error": "the phone refused it" }))
                                 .collect();
-                            json!({ "devices": [{ "id": "phone1", "name": "Pandora", "type": "phone", "paired": true, "online": f.online, "plugins": ["share", "clipboard"] },
+                            let plugins =
+                                if f.sms { json!(["share", "clipboard", "sms"]) } else { json!(["share", "clipboard"]) };
+                            let conversations = json!([
+                                { "thread": 1, "name": "Kari", "address": "+15550100123", "addresses": ["+15550100123"] },
+                                { "thread": 2, "name": "Kari, Ola", "address": "+15550100123", "addresses": ["+15550100123", "+15550100456"] },
+                                { "thread": 3, "name": "", "address": "+15550100789", "addresses": ["+15550100789"] }
+                            ]);
+                            json!({ "devices": [{ "id": "phone1", "name": "Pandora", "type": "phone", "paired": true, "online": f.online, "plugins": plugins, "conversations": conversations },
                                                 { "id": "tv1", "name": "Living room", "type": "tv", "paired": true, "online": true, "plugins": ["clipboard"] }],
                                     "transfers": transfers, "clipboard": { "secret": "never read" } })
                         }
@@ -222,4 +231,34 @@ fn tempfile_in(dir: &Path) -> std::io::Result<PathBuf> {
     let path = dir.join(format!("nyx-share-flux-{}", uuid::Uuid::new_v4().simple()));
     std::fs::File::create_new(&path)?;
     Ok(path)
+}
+
+#[test]
+fn texts_through_a_phone_that_sends_text_messages() {
+    let dir = scratch("sms");
+    let fake = Arc::new(StdMutex::new(Fake { online: true, sms: true, ..Default::default() }));
+    let socket = serve(&dir, fake.clone());
+    let flux = FluxProvider::new(socket.clone());
+    let sms = flux.destinations().into_iter().find(|d| d.id == "flux-sms:phone1").expect("listed");
+    assert!(sms.needs_recipient && sms.available);
+    assert_eq!(sms.kinds, vec![ContentKind::Text, ContentKind::Url]);
+    let suggested: Vec<(String, String)> = flux.recipients(&sms.id).into_iter().map(|r| (r.name, r.address)).collect();
+    assert_eq!(suggested, [("Kari".into(), "+15550100123".into()), ("+15550100789".into(), "+15550100789".into())], "no groups");
+
+    let options = SendOptions { recipient: Some("+15550100123".into()), ..Default::default() };
+    let cancel = AtomicBool::new(false);
+    let items = [text(ContentKind::Text, "On my way"), text(ContentKind::Url, "https://example.com")];
+    let task = Task { items: &items, options: &options, cancel: &cancel, progress: &|_| {}, step: &|_| {} };
+    assert_eq!(flux.send(&sms.id, &task).unwrap().message, "Pandora is texting Kari");
+    let sent = fake.lock().unwrap().calls.iter().find(|(m, _)| m == "sms.send").cloned().unwrap().1;
+    assert_eq!(sent, json!({ "device": "phone1", "addresses": ["+15550100123"], "body": "On my way\nhttps://example.com" }));
+
+    let nobody = Task { options: &SendOptions::default(), ..task };
+    assert!(matches!(flux.send(&sms.id, &nobody), Err(SendError::Failed { message, .. }) if message == "Choose who to text"));
+    fake.lock().unwrap().online = false;
+    let offline = Task { items: &items, options: &options, cancel: &cancel, progress: &|_| {}, step: &|_| {} };
+    assert!(
+        matches!(flux.send(&sms.id, &offline), Err(SendError::Failed { message, .. }) if message.starts_with("Pandora is offline"))
+    );
+    std::fs::remove_dir_all(dir).unwrap();
 }

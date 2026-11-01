@@ -158,6 +158,7 @@ impl Provider for Bluetooth {
                 kinds: self.kinds(),
                 max_items: None,
                 needs_folder: false,
+                needs_recipient: false,
                 available: obex,
                 status: Some(match (obex, d.connected) {
                     (false, _) => "Install bluez-obex to send files".into(),

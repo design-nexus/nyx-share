@@ -170,6 +170,7 @@ impl Provider for Cloud {
                 kinds: self.kinds(),
                 max_items: None,
                 needs_folder: false,
+                needs_recipient: false,
                 available: r.connection != "error",
                 status: Some(match r.mount_status.as_str() {
                     "mounted" => "Cloud".into(),

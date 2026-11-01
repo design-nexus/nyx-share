@@ -49,7 +49,28 @@ fn send_options(options: &ShareOptions, sandboxed: bool) -> fdo::Result<SendOpti
     if let Some(sub) = &subfolder {
         nyx_share_nas::clean_subfolder(sub).map_err(fdo::Error::InvalidArgs)?;
     }
-    Ok(SendOptions { folder, subfolder })
+    let recipient = match options.recipient.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+        None => None,
+        Some(_) if sandboxed => {
+            return Err(fdo::Error::AccessDenied(
+                "Sandboxed apps can't choose who to text; use Share to let the user pick".into(),
+            ));
+        }
+        Some(r) => Some(phone_number(r).map_err(fdo::Error::InvalidArgs)?),
+    };
+    Ok(SendOptions { folder, subfolder, recipient })
+}
+
+/// A phone number as typed: digits with an optional leading +, spaces, dashes,
+/// dots and parentheses. Returned without the separators.
+fn phone_number(text: &str) -> Result<String, String> {
+    let ok = text.chars().all(|c| c.is_ascii_digit() || " -.()+".contains(c)) && text.rfind('+').is_none_or(|i| i == 0);
+    let digits: String = text.chars().filter(|c| c.is_ascii_digit() || *c == '+').collect();
+    let count = digits.chars().filter(char::is_ascii_digit).count();
+    if !ok || !(3..=20).contains(&count) {
+        return Err(format!("{text} isn't a phone number"));
+    }
+    Ok(digits)
 }
 
 /// Run blocking work (network checks) off the D-Bus executor.
@@ -228,7 +249,7 @@ impl Share1 {
         self.0.touch();
         let devices = self.0.devices.read().unwrap_or_else(|e| e.into_inner()).clone();
         let all = self.0.routes();
-        let linkable: Vec<_> = all.iter().filter(|d| nyx_share_core::devices::LINKABLE.contains(&d.provider.as_str())).collect();
+        let linkable: Vec<_> = all.iter().filter(|d| nyx_share_core::devices::linkable(d)).collect();
         let suggestions: Vec<_> = nyx_share_core::devices::suggestions(&all, &devices)
             .into_iter()
             .map(|(name, routes)| serde_json::json!({ "name": name, "routes": routes }))
@@ -283,6 +304,28 @@ impl Share1 {
         crate::devices::save(&list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))?;
         let _ = Self::destinations_changed(&emitter).await;
         Ok(())
+    }
+
+    /// Suggested recipients for a destination with `needs_recipient`, as JSON
+    /// `[{name,address}]`. Not for sandboxed callers: they are contacts.
+    async fn list_recipients(
+        &self,
+        destination: &str,
+        #[zbus(header)] header: Header<'_>,
+        #[zbus(connection)] conn: &Connection,
+    ) -> fdo::Result<String> {
+        self.0.touch();
+        if caller::identify(conn, &header).await?.sandboxed {
+            return Err(fdo::Error::AccessDenied("Sandboxed apps can't list contacts".into()));
+        }
+        let state = self.0.clone();
+        let destination = destination.to_string();
+        let list = blocking_task(move || {
+            let provider = state.providers().into_iter().find(|p| p.destinations().iter().any(|d| d.id == destination));
+            provider.map(|p| p.recipients(&destination)).unwrap_or_default()
+        })
+        .await;
+        Ok(json(&list))
     }
 
     /// The arrangement and settings as JSON: order, pinned, hidden, disabled, default, history.

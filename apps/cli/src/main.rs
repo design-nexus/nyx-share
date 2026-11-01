@@ -27,6 +27,7 @@ Options:
   --device NAME        Send straight to a computer or nearby device, by name
   --nas NAME           Send straight to a NAS folder, by name
   --subfolder PATH     With --nas or a cloud account: into this folder under it
+  --recipient NUMBER   With a text message destination: the phone number to text
   --folder DIR         The folder for --to save
   --no-wait            Don't wait for --to to finish
   -h, --help           Show this help
@@ -118,7 +119,7 @@ fn run(args: &[String]) -> Result<ExitCode, Error> {
 
 fn share(args: &[String]) -> Result<ExitCode, Error> {
     let mut content = Content::new();
-    let (mut to, mut folder, mut wait, mut subfolder) = (None, None, true, None);
+    let (mut to, mut folder, mut wait, mut subfolder, mut recipient) = (None, None, true, None, None);
     let mut it = args.iter();
     let value = |it: &mut std::slice::Iter<'_, String>, flag: &str| {
         it.next().cloned().ok_or_else(|| Error::Refused(format!("{flag} needs a value")))
@@ -135,6 +136,7 @@ fn share(args: &[String]) -> Result<ExitCode, Error> {
             "--device" => to = Some(device(&value(&mut it, "--device")?)?),
             "--nas" => to = Some(nas_destination(&value(&mut it, "--nas")?)?),
             "--subfolder" => subfolder = Some(value(&mut it, "--subfolder")?),
+            "--recipient" => recipient = Some(value(&mut it, "--recipient")?),
             "--folder" => folder = Some(value(&mut it, "--folder")?),
             "--no-wait" => wait = false,
             "--" => {
@@ -160,7 +162,8 @@ fn share(args: &[String]) -> Result<ExitCode, Error> {
         client.share(&content, &ShareOptions { app_name: Some("Terminal".into()), ..Default::default() })?;
         return Ok(ExitCode::SUCCESS);
     };
-    let options = ShareOptions { app_name: Some("Terminal".into()), folder, subfolder, notify: Some(!wait), notify_after: None };
+    let options =
+        ShareOptions { app_name: Some("Terminal".into()), folder, subfolder, recipient, notify: Some(!wait), notify_after: None };
     let id = client.share_to(&to, &content, &options)?;
     if !wait {
         println!("{id}");

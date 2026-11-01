@@ -124,6 +124,7 @@ impl Provider for NasProvider {
                 kinds: self.kinds(),
                 max_items: None,
                 needs_folder: false,
+                needs_recipient: false,
                 available: true,
                 status: Some(match n.host() {
                     h if h.is_empty() => n.protocol().to_string(),

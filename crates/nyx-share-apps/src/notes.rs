@@ -61,6 +61,7 @@ impl Provider for Notes {
             kinds: self.kinds(),
             max_items: Some(1),
             needs_folder: false,
+            needs_recipient: false,
             available: true,
             status: None,
             pinned: false,

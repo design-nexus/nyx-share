@@ -2,7 +2,7 @@
 //! owns pairing and the connection; Share only asks it to send, over its
 //! socket of JSON lines (`{"id":1,"method":"share.url","params":{…}}`).
 
-use nyx_share_core::{ContentKind, Destination, Section};
+use nyx_share_core::{ContentKind, Destination, Recipient, Section};
 use nyx_share_providers::stage::Stage;
 use nyx_share_providers::{Data, Outcome, Payload, Provider, SendError, Task};
 use serde::Deserialize;
@@ -15,6 +15,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub const PREFIX: &str = "flux:";
+/// A text message through a phone paired in Flux.
+pub const SMS_PREFIX: &str = "flux-sms:";
+/// The longest text message Share sends; the phone splits it into parts.
+const MAX_SMS: usize = 2000;
 /// Flux's own limits: files waiting in its outbox, and text sent to a device.
 const MAX_FILES: u32 = 100;
 const MAX_TEXT: usize = 256 << 10;
@@ -109,12 +113,30 @@ pub struct Device {
     pub online: bool,
     #[serde(default)]
     pub plugins: Vec<String>,
+    /// The latest message of each text conversation, once Flux has asked.
+    #[serde(default)]
+    pub conversations: Vec<Conversation>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Conversation {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub address: String,
+    #[serde(default)]
+    pub addresses: Vec<String>,
 }
 
 impl Device {
     /// Paired, and the device takes shares.
     fn usable(&self) -> bool {
         self.paired && self.plugins.iter().any(|p| p == "share")
+    }
+
+    /// Paired, and the phone sends text messages for this computer.
+    fn texts(&self) -> bool {
+        self.paired && self.plugins.iter().any(|p| p == "sms")
     }
 }
 
@@ -204,7 +226,27 @@ impl Provider for FluxProvider {
     }
 
     fn destinations(&self) -> Vec<Destination> {
-        self.devices()
+        let devices = self.devices();
+        let texts = devices.iter().filter(|d| d.texts()).map(|d| Destination {
+            id: format!("{SMS_PREFIX}{}", d.id),
+            provider: self.id().into(),
+            name: "Text message".into(),
+            icon: "chat-message-new-symbolic".into(),
+            tint: "green".into(),
+            section: Section::Apps,
+            kinds: vec![ContentKind::Text, ContentKind::Url],
+            max_items: Some(5),
+            needs_folder: false,
+            needs_recipient: true,
+            // Flux sends a text only while the phone is connected.
+            available: d.online,
+            status: Some(if d.online { format!("From {}", d.name) } else { format!("{} is offline", d.name) }),
+            pinned: false,
+            hidden: false,
+            default: false,
+        });
+        let texts: Vec<Destination> = texts.collect();
+        devices
             .into_iter()
             .filter(Device::usable)
             .map(|d| Destination {
@@ -217,6 +259,7 @@ impl Provider for FluxProvider {
                 kinds: self.kinds(),
                 max_items: Some(MAX_FILES),
                 needs_folder: false,
+                needs_recipient: false,
                 // Files wait in Flux's outbox for an offline device.
                 available: true,
                 status: Some(if d.online { "Flux".into() } else { "Offline · Flux sends files when it's back".into() }),
@@ -224,10 +267,29 @@ impl Provider for FluxProvider {
                 hidden: false,
                 default: false,
             })
+            .chain(texts)
             .collect()
     }
 
+    fn recipients(&self, destination: &str) -> Vec<Recipient> {
+        let Some(id) = destination.strip_prefix(SMS_PREFIX) else { return Vec::new() };
+        let Some(device) = self.devices().into_iter().find(|d| d.id == id) else { return Vec::new() };
+        let mut out: Vec<Recipient> = Vec::new();
+        // One-to-one conversations only; Flux for Android texts one address.
+        for c in device.conversations.iter().filter(|c| c.addresses.len() <= 1 && !c.address.is_empty()) {
+            if !out.iter().any(|r| r.address == c.address) {
+                let name = if c.name.trim().is_empty() { c.address.clone() } else { c.name.clone() };
+                out.push(Recipient { name, address: c.address.clone() });
+            }
+        }
+        out.truncate(20);
+        out
+    }
+
     fn send(&self, destination: &str, task: &Task<'_>) -> Result<Outcome, SendError> {
+        if let Some(id) = destination.strip_prefix(SMS_PREFIX) {
+            return self.text(id, task);
+        }
         let id = destination.strip_prefix(PREFIX).unwrap_or(destination);
         let failed = |e: FluxError| SendError::failed(e.message);
         let mut conn = Conn::open(&self.socket).map_err(failed)?;
@@ -302,6 +364,55 @@ impl Provider for FluxProvider {
             },
             outputs: Vec::new(),
         })
+    }
+}
+
+impl FluxProvider {
+    /// Send the items' text as one text message through the phone.
+    fn text(&self, id: &str, task: &Task<'_>) -> Result<Outcome, SendError> {
+        let to = task.options.recipient.as_deref().ok_or_else(|| SendError::failed("Choose who to text"))?;
+        let body: Vec<&str> =
+            task.items.iter().filter_map(|p| if let Data::Text(t) = &p.data { Some(t.trim()) } else { None }).collect();
+        if body.len() != task.items.len() {
+            return Err(SendError::failed("A text message takes only text and links"));
+        }
+        let body = body.join("\n");
+        if body.is_empty() {
+            return Err(SendError::failed("There's nothing to text"));
+        }
+        if body.chars().count() > MAX_SMS {
+            return Err(SendError::failed(format!("A text message is at most {MAX_SMS} characters")));
+        }
+        let failed = |e: FluxError| SendError::failed(e.message);
+        let mut conn = Conn::open(&self.socket).map_err(failed)?;
+        let device = snapshot(&mut conn)
+            .map_err(failed)?
+            .devices
+            .into_iter()
+            .find(|d| d.id == id && d.texts())
+            .ok_or_else(|| SendError::failed("That phone doesn't send text messages through Flux any more"))?;
+        if !device.online {
+            return Err(SendError::failed(format!(
+                "{} is offline. Flux sends a text only while the phone is connected.",
+                device.name
+            )));
+        }
+        if task.cancelled() {
+            return Err(SendError::Cancelled { outputs: Vec::new() });
+        }
+        let who = device
+            .conversations
+            .iter()
+            .find(|c| c.address == to && !c.name.trim().is_empty())
+            .map_or_else(|| to.to_string(), |c| c.name.clone());
+        conn.call("sms.send", json!({ "device": device.id, "addresses": [to], "body": body })).map_err(|e| {
+            match e.code.as_str() {
+                "unsupported" => SendError::failed(format!("{} can't send that text", device.name)),
+                _ => failed(e),
+            }
+        })?;
+        (task.progress)(body.len() as u64);
+        Ok(Outcome { message: format!("{} is texting {who}", device.name), outputs: Vec::new() })
     }
 }
 
