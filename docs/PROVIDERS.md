@@ -30,6 +30,7 @@ plus any outputs. A destination declares the kinds it takes, an optional
 | `localsend` | `localsend:<key>` (each nearby device) | text, url, image, file | LocalSend v2 upload to a device found on the network or tailnet, pinned to its key; see [LOCALSEND.md](LOCALSEND.md). Saved computers are left to `computers`. |
 | `computers` | `computer:<id>` (each saved computer) | text, url, image, file | Always listed, with LAN, Tailscale or Offline as status. Sending re-checks the routes in order and pins the saved key. |
 | `flux` | `flux:<id>` (each device paired in Flux) | text, url, image, file; 100 | Through fluxd's socket: `share.url`, `share.text`, `share.files` with staged files, progress from its transfers; see [FLUX.md](FLUX.md). |
+| `flux` | `flux-sms:<id>` (each phone in Flux that sends text messages) | text, url; 5 | A text message through the phone with `sms.send`, to the `recipient` the sheet asks for; recent conversations suggested through `ListRecipients`. |
 | `nas` | `nas:<id>` (each NAS folder) | text, image, file | GVfs copy with partial files and no replacing; `subfolder` option; see [NAS.md](NAS.md). |
 | `qr` | `qr` ("QR code") | text, url; 1 item | Makes a QR code here (UTF-8 marked with ECI when needed, at most 1,200 bytes) as a PNG in `$XDG_RUNTIME_DIR/nyx-share/qr`, removed after an hour. The Share Sheet shows it with Copy image and Save image. |
 | `notes` | `notes` ("Notes") | text, url; 1 item | Nyx Notes' `notes.vault_create`, or `notes.clip` for a web link: Notes shows the new note for you to accept, and the job reports what you decided. Starts Notes if needed; needs a vault open and "proposed edits" allowed in Notes. |
@@ -45,8 +46,7 @@ serves for Nyx Assistant (`io.github.design_nexus.nyx.Control`,
 
 ## Not done
 
-SMS through Flux, and Nyx Assistant: Assistant has no way yet to receive shared
-content into a conversation.
+Nyx Assistant: it has no way yet to receive shared content into a conversation.
 
 ## External providers
 
