@@ -85,7 +85,10 @@ fn reports_version_and_destinations() {
     let for_files = ids(client.destinations(&[ContentKind::File], 3).unwrap());
     assert!(for_files.contains(&"save".into()) && !for_files.iter().any(|d| d == "clipboard" || d == "qr"), "{for_files:?}");
     let for_link = ids(client.destinations(&[ContentKind::Url], 1).unwrap());
-    assert!(for_link.contains(&"clipboard".into()) && for_link.contains(&"qr".into()) && !for_link.contains(&"save".into()), "{for_link:?}");
+    assert!(
+        for_link.contains(&"clipboard".into()) && for_link.contains(&"qr".into()) && !for_link.contains(&"save".into()),
+        "{for_link:?}"
+    );
 }
 
 #[test]

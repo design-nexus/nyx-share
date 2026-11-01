@@ -176,7 +176,8 @@ impl Content {
             .join("nyx-share-client");
         std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
         let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
-        let path = dir.join(format!("{}-{unique}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        let path =
+            dir.join(format!("{}-{unique}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         let written = (|| -> std::io::Result<File> {
             let mut out = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
             out.write_all(bytes)?;
@@ -375,8 +376,14 @@ mod tests {
         f.read_to_end(&mut buf).unwrap();
         read.push_str(&String::from_utf8_lossy(&buf));
         assert!(read.ends_with("PNG data"));
-        let dir = std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir).join("nyx-share-client");
-        let leftover = std::fs::read_dir(dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(&format!("{}-", std::process::id())));
+        let dir = std::env::var_os("XDG_RUNTIME_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("nyx-share-client");
+        let leftover = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().starts_with(&format!("{}-", std::process::id())));
         assert!(!leftover);
         // Opened read-only, as the service requires.
         assert!(std::io::Write::write_all(&mut content.files[0], b"x").is_err());

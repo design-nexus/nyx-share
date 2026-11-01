@@ -148,7 +148,14 @@ impl Provider for Cloud {
 
     fn destinations(&self) -> Vec<Destination> {
         let Ok(bus) = zbus::blocking::Connection::session() else { return Vec::new() };
-        // Cloud isn't installed or running: nothing to offer.
+        // Listing destinations doesn't start Cloud; while it isn't running there's nothing to offer.
+        let running = zbus::blocking::fdo::DBusProxy::new(&bus)
+            .ok()
+            .and_then(|p| p.name_has_owner(self.bus_name.as_str().try_into().ok()?).ok())
+            .unwrap_or(false);
+        if !running {
+            return Vec::new();
+        }
         let Ok(remotes) = self.remotes(&bus) else { return Vec::new() };
         remotes
             .into_iter()

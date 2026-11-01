@@ -15,7 +15,17 @@
 | 6 | Flux phones | Done: paired devices with the share plugin under My devices; links, text and files through fluxd, with progress, cancel and the offline outbox ([FLUX.md](FLUX.md)). Checked with a fake fluxd and with Flux 0.19.1 and an Android phone. Not done: SMS, merging a phone seen through both Flux and LocalSend |
 | 7 | Mail, Cloud, Pulse, Bluetooth, QR code, Notes, Assistant; external providers | Done except Assistant ([PROVIDERS.md](PROVIDERS.md)). Checked: QR code on screen and decoded; Notes and Mail with test copies (the review and the draft with its attachment open; accepting in Notes not clicked); Cloud against a stand-in service; Pulse listing your chats (sending not tried, by your choice); Bluetooth to an Android phone; external providers in the real sandbox. Assistant has no way to receive content yet; SMS not done |
 | 8 | Settings → Sharing | Done in nyx-settings: nearby sharing, saved computers and trust, NAS folders (passwords through `SaveNas`), and the Share Sheet's destinations (pin, hide, order), talking only to `Share1` through `nyx-share-client`. Checked on screen against a test service; the buttons and dialogs themselves not yet clicked through |
-| 9 | Capture, Photos, PDF, Notes, Maps, Mail, Cloud clients | Planned |
-| 10 | Third-party docs, provider manifest, portal investigation | API docs and client done; a freedesktop sharing portal is a possible upstream proposal |
+| 9 | Capture, Photos, PDF, Notes, Maps, Mail, Cloud clients | Done for Capture, Photos, PDF, Notes, Maps and Mail, through `nyx-share-client` (Files earlier, through its provider). Capture's editor button checked on screen; the other buttons and menu items built but not clicked. Nyx Browser doesn't exist; Nyx Cloud has no window of its own (its accounts are a destination) |
+| 10 | Third-party docs, provider manifest, portal investigation | Done: [INTEGRATION.md](INTEGRATION.md) with examples in shell and C run by `tests/examples.sh`, [CLI.md](CLI.md), the provider manifest in [PROVIDERS.md](PROVIDERS.md), and [PORTAL.md](PORTAL.md) (no sharing portal exists; a possible upstream proposal, not done) |
 
-Also planned: folder sharing, and the Share app icon in nyx-icons.
+Still open:
+
+- Settings → Sharing doesn't yet have the spec's Transfers section (active,
+  recent and failed transfers, retry, history retention), turning whole
+  providers on and off, or default providers; the Share app has Transfers.
+- Nyx Assistant as a destination (it needs a way to receive content), and SMS
+  through Flux.
+- Folder sharing, for every destination.
+- One entry for a phone seen through both Flux and LocalSend or Bluetooth,
+  linked by the user.
+- A freedesktop sharing portal, as an upstream proposal ([PORTAL.md](PORTAL.md)).

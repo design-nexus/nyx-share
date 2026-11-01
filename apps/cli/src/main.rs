@@ -26,7 +26,7 @@ Options:
                        (see `nyx-share destinations`)
   --device NAME        Send straight to a computer or nearby device, by name
   --nas NAME           Send straight to a NAS folder, by name
-  --subfolder PATH     With --nas: into this folder under the NAS folder
+  --subfolder PATH     With --nas or a cloud account: into this folder under it
   --folder DIR         The folder for --to save
   --no-wait            Don't wait for --to to finish
   -h, --help           Show this help

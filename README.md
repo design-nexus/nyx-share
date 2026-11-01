@@ -108,6 +108,14 @@ for a single image. A send that is still running after a few seconds continues
 in the background and notifies when it finishes. Folders aren't offered yet. The registration is `~/.config/nyx-files/providers/nyx-share/`; delete it,
 or add an empty `disabled` file beside it, to turn this off.
 
+## In the Nyx apps
+
+Capture (the editor's Share button, and Share… for a capture), Photos (Share…
+for the selection, and the viewer's Share button), PDF (Share… in the document
+menu, with unsaved changes as a copy), Notes (Share… for a note, as it is in the
+editor), Maps (a place's Share button, as an OpenStreetMap link) and Mail (a
+Share button on each attachment) open the Share Sheet through the same client.
+
 ## For app developers
 
 Apps call the service over D-Bus, with files passed as read-only file
@@ -121,8 +129,11 @@ content.file("/home/me/Pictures/photo.jpg")?;
 Client::connect()?.share(&content, &ShareOptions { app_name: Some("Photos".into()), ..Default::default() })?;
 ```
 
-See [API.md](docs/API.md) for the interface, [ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[PROVIDERS.md](docs/PROVIDERS.md) and [SECURITY.md](docs/SECURITY.md). The Phase 0
+Start with [INTEGRATION.md](docs/INTEGRATION.md): which call to use, and tested
+examples in shell and C. See [API.md](docs/API.md) for the interface,
+[CLI.md](docs/CLI.md) for the command, [PROVIDERS.md](docs/PROVIDERS.md) for adding
+a destination, [PORTAL.md](docs/PORTAL.md) for portals,
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) and [SECURITY.md](docs/SECURITY.md). The Phase 0
 integration audit is [docs/AUDIT.md](docs/AUDIT.md).
 
 ## Configuration
