@@ -26,7 +26,7 @@ Downloads folder. See [LOCALSEND.md](docs/LOCALSEND.md).
 
 Transfers run in the service, so closing the Share Sheet doesn't stop them, and
 the service notifies you when one finishes after the sheet has closed. Phones
-through SMS, Nyx app destinations and the Settings page are planned; see
+through SMS and Nyx app destinations are planned; see
 [the roadmap](docs/ROADMAP.md). Nothing in the sheet appears for a destination
 that doesn't exist yet.
 
@@ -50,6 +50,9 @@ test, remove). Ctrl+, opens them, F5 looks for devices again, Esc closes.
 ![An offer from a nearby phone](docs/screenshots/app-incoming-dark.png)
 ![Transfers](docs/screenshots/app-transfers-dark.png)
 ![Settings in the light theme](docs/screenshots/app-settings-light.png)
+
+Settings → Sharing in Nyx Settings has the same settings, plus which
+destinations the Share Sheet offers, pinned, hidden and in what order.
 
 ## Install
 

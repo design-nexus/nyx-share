@@ -14,7 +14,7 @@
 | 5 | NAS destinations | Done through GVfs (SMB, SFTP, NFS, local): [NAS.md](NAS.md). Checked against Samba and OpenSSH servers; NFS unverified (libnfs failed against NFS-Ganesha) |
 | 6 | Flux phones | Done: paired devices with the share plugin under My devices; links, text and files through fluxd, with progress, cancel and the offline outbox ([FLUX.md](FLUX.md)). Checked with a fake fluxd and with Flux 0.19.1 and an Android phone. Not done: SMS, merging a phone seen through both Flux and LocalSend |
 | 7 | Mail, Cloud, Pulse, Bluetooth, QR code, Notes, Assistant; external providers | Planned: [PROVIDERS.md](PROVIDERS.md) |
-| 8 | Settings → Sharing | Planned; talks only to `Share1` |
+| 8 | Settings → Sharing | Done in nyx-settings: nearby sharing, saved computers and trust, NAS folders (passwords through `SaveNas`), and the Share Sheet's destinations (pin, hide, order), talking only to `Share1` through `nyx-share-client`. Checked on screen against a test service; the buttons and dialogs themselves not yet clicked through |
 | 9 | Capture, Photos, PDF, Notes, Maps, Mail, Cloud clients | Planned |
 | 10 | Third-party docs, provider manifest, portal investigation | API docs and client done; a freedesktop sharing portal is a possible upstream proposal |
 
