@@ -68,6 +68,8 @@ pub struct State {
     calls: AtomicUsize,
     /// What failed jobs need to run again, for a while: their items stay open.
     retries: Mutex<HashMap<String, Retry>>,
+    /// Devices reached several ways, as the user linked them.
+    pub devices: RwLock<Vec<nyx_share_core::LinkedDevice>>,
 }
 
 struct Retry {
@@ -148,6 +150,7 @@ impl State {
             last_activity: Mutex::new(Instant::now()),
             calls: AtomicUsize::new(0),
             retries: Mutex::new(HashMap::new()),
+            devices: RwLock::new(crate::devices::load()),
         }
     }
 
@@ -207,8 +210,14 @@ impl State {
 
     /// Every destination, arranged by the user's preferences.
     pub fn destinations(&self) -> Vec<Destination> {
-        let all = self.providers().iter().flat_map(|p| p.destinations()).collect();
-        arrange(all, &lock(&self.prefs))
+        let devices = self.devices.read().unwrap_or_else(|e| e.into_inner()).clone();
+        arrange(nyx_share_core::devices::link(self.routes(), &devices), &lock(&self.prefs))
+    }
+
+    /// Every provider's destinations, before linking, without turned-off providers.
+    pub fn routes(&self) -> Vec<Destination> {
+        let disabled = lock(&self.prefs).disabled.clone();
+        self.providers().iter().filter(|p| !disabled.iter().any(|d| d == p.id())).flat_map(|p| p.destinations()).collect()
     }
 
     pub fn destinations_for(&self, kinds: &[ContentKind], count: usize) -> Vec<Destination> {
@@ -317,15 +326,52 @@ impl State {
         {
             return Err(fdo::Error::Failed(format!("{} is turned off in Settings → Sharing", p.name())));
         }
-        let (provider, dest) = self
-            .providers()
-            .into_iter()
-            .find_map(|p| p.destinations().into_iter().find(|d| d.id == destination).map(|d| (p.clone(), d)))
-            .ok_or_else(|| fdo::Error::UnknownObject(format!("There is no destination called {destination}")))?;
+        let kinds = kinds_of(items.iter().map(|p| &p.info.kind));
+        let provider_of = |id: &str| self.providers().into_iter().find(|p| p.destinations().iter().any(|d| d.id == id));
+        let (routes, dest) = match destination.strip_prefix(nyx_share_core::devices::PREFIX) {
+            Some(device_id) => {
+                let device = self
+                    .devices
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .find(|d| d.id == device_id)
+                    .cloned()
+                    .ok_or_else(|| fdo::Error::UnknownObject(format!("There is no device called {destination}")))?;
+                let all = self.routes();
+                let order = nyx_share_core::devices::routes_for(&device, &all, &kinds, items.len());
+                if order.is_empty() {
+                    return Err(fdo::Error::Failed(format!(
+                        "None of the ways to reach {} can take these items now",
+                        device.name
+                    )));
+                }
+                let routes: Vec<(Arc<dyn Provider>, String, String)> = order
+                    .iter()
+                    .filter_map(|d| {
+                        let way = nyx_share_core::devices::route_name(d).unwrap_or_else(|| d.name.clone());
+                        provider_of(&d.id).map(|p| (p, d.id.clone(), way))
+                    })
+                    .collect();
+                let dest = self
+                    .destinations()
+                    .into_iter()
+                    .find(|d| d.id == destination)
+                    .ok_or_else(|| fdo::Error::Failed(format!("{} isn't reachable now", device.name)))?;
+                (routes, dest)
+            }
+            None => {
+                let (provider, dest) = self
+                    .providers()
+                    .into_iter()
+                    .find_map(|p| p.destinations().into_iter().find(|d| d.id == destination).map(|d| (p.clone(), d)))
+                    .ok_or_else(|| fdo::Error::UnknownObject(format!("There is no destination called {destination}")))?;
+                (vec![(provider, dest.id.clone(), dest.name.clone())], dest)
+            }
+        };
         if !dest.available {
             return Err(fdo::Error::Failed(dest.status.unwrap_or_else(|| format!("{} isn't available", dest.name))));
         }
-        let kinds = kinds_of(items.iter().map(|p| &p.info.kind));
         if !dest.accepts(&kinds, items.len()) {
             return Err(fdo::Error::InvalidArgs(format!("{} can't take these items", dest.name)));
         }
@@ -361,7 +407,7 @@ impl State {
         let state = self.clone();
         let (dest_id, job_id) = (dest.id.clone(), id.clone());
         std::thread::spawn(move || {
-            state.run(provider, &dest_id, &job_id, &items, &options, &cancel);
+            state.run(routes, &job_id, &items, &options, &cancel);
             if state.job(&job_id).is_some_and(|j| j.state == JobState::Failed) {
                 let mut retries = lock(&state.retries);
                 retries.retain(|_, r| r.at.elapsed() < RETRY_FOR);
@@ -415,10 +461,11 @@ impl State {
         self.save_history();
     }
 
+    /// Send through the first route; when one fails (not cancelled) and another
+    /// is left, start over with the next. A linked device has several.
     fn run(
         &self,
-        provider: Arc<dyn Provider>,
-        destination: &str,
+        routes: Vec<(Arc<dyn Provider>, String, String)>,
         id: &str,
         items: &[Payload],
         options: &SendOptions,
@@ -437,7 +484,20 @@ impl State {
             self.update(id, true, |j| j.step = text.map(str::to_string));
         };
         let task = Task { items, options, cancel, progress: &progress, step: &step };
-        let result = provider.send(destination, &task);
+        let mut result = Err(SendError::failed("Nothing to send it with"));
+        for (i, (provider, destination, name)) in routes.iter().enumerate() {
+            if i > 0 {
+                self.update(id, true, |j| {
+                    j.bytes_done = 0;
+                    j.step = Some(format!("Trying {name}…"));
+                });
+            }
+            result = provider.send(destination, &task);
+            let failed = matches!(result, Err(SendError::Failed { .. }));
+            if !failed || cancel.load(Ordering::Relaxed) || i + 1 == routes.len() {
+                break;
+            }
+        }
         let finished = self.update(id, true, |j| {
             j.step = None;
             match result {

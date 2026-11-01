@@ -3,6 +3,7 @@
 
 mod caller;
 mod config;
+mod devices;
 mod items;
 mod launch;
 mod nas;

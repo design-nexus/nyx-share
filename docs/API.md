@@ -21,6 +21,9 @@ version; anything else gets `Share2`.
 | `GetPreferences` | `() → s` | The same fields as JSON, with the history limit in effect. |
 | `RetryJob` | `(s id) → s` | Run a failed job again as a new job (its id); possible while `retryable` is true (30 minutes, the last 20 failures). Not for sandboxed callers. |
 | `ClearHistory` | `() → ()` | Forget finished transfers. Not for sandboxed callers. |
+| `ListDevices` | `() → s` | Linked devices as JSON: `{"devices":[{id,name,routes}],"suggestions":[{name,routes}],"routes":[{id,name,provider,status}]}`. `routes` lists every linkable destination present now (saved computers, Flux, Bluetooth, LocalSend); `suggestions` groups unlinked ones with the same name, for the user to confirm. |
+| `SaveDevice` | `(s device) → s` | Link two to six routes into one device (`{id,name,routes}`, empty `id` adds one); returns the id. A route belongs to one device, so it leaves any other. |
+| `RemoveDevice` | `(s id) → ()` | Unlink a device; its routes are listed on their own again. |
 | `Scan` | `() → ()` | Ask nearby devices to answer now. |
 | `Hold` | `() → ()` | Keep the service, and Nearby visibility, running while the caller stays on the bus. |
 | `GetNearby` | `() → s` | JSON: `enabled`, `visibility` (`running` or `off`), `alias`, `fingerprint`, `receive_folder`, `problem`, `tailscale`, `tailscale_state`. |
@@ -160,3 +163,12 @@ the focus and the order of the tiles, and `NYX_SHARE_CHECK_ANSWER`
 dialog, `NYX_SHARE_CHECK_NAS` (`name|address|tailscale|user|password`) fills
 that dialog and adds, and `NYX_SHARE_CHECK_SEND=1` sends to the first device
 that appears.
+
+## Linked devices
+
+A linked device replaces its routes in `ListDestinations` with one destination,
+`device:<id>` (provider `devices`): it takes what any route takes, and its status
+names the routes that are up ("Flux · Bluetooth"). A share to it tries the routes
+that take the items, reachable ones first in the user's order; when one fails the
+job starts over with the next (its `step` says "Trying Bluetooth…"). A cancel stops
+it. The links are kept in `$XDG_CONFIG_HOME/nyx-share/devices.toml`.

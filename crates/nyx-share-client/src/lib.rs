@@ -11,7 +11,7 @@
 //!
 //! Calls block, so make them from a worker thread, never a UI thread.
 
-pub use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, PreferencesUpdate};
+pub use nyx_share_core::{ContentKind, Destination, Direction, Job, JobState, LinkedDevice, Preferences, PreferencesUpdate};
 pub use nyx_share_dbus::{
     BUS, Capabilities, ComputerInfo, INTERFACE, NasInfo, NearbyStatus, NearbyUpdate, PATH, ProviderInfo, RequestInfo,
     ShareOptions,
@@ -251,6 +251,20 @@ impl Client {
     /// The arrangement and settings (`history` is the limit in effect).
     pub fn preferences(&self) -> Result<nyx_share_core::Preferences, Error> {
         json(&self.proxy.get_preferences()?)
+    }
+
+    /// Linked devices, suggestions and the linkable routes present now (JSON).
+    pub fn devices(&self) -> Result<serde_json::Value, Error> {
+        json(&self.proxy.list_devices()?)
+    }
+
+    /// Link routes into one device; returns its id.
+    pub fn save_device(&self, device: &LinkedDevice) -> Result<String, Error> {
+        Ok(self.proxy.save_device(&to_json(device))?)
+    }
+
+    pub fn remove_device(&self, id: &str) -> Result<(), Error> {
+        Ok(self.proxy.remove_device(id)?)
     }
 
     /// Forget finished transfers.

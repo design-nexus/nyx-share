@@ -9,12 +9,15 @@
 //! nothing reaches the real one) and a stand-in for the Share Sheet that records
 //! the request it was given. Nothing opens on screen.
 
-use nyx_share_client::{Client, Content, ContentKind, Error, JobState, NasInfo, PreferencesUpdate, ShareOptions};
+use nyx_share_client::{Client, Content, ContentKind, Error, JobState, LinkedDevice, NasInfo, PreferencesUpdate, ShareOptions};
 use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -34,6 +37,7 @@ fn service() -> &'static Service {
         let sheet = root.join("fake-sheet");
         std::fs::write(&sheet, format!("#!/bin/sh\nenv | grep '^NYX_SHARE_' > '{}/sheet-env'\n", root.display())).unwrap();
         std::fs::set_permissions(&sheet, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fake_flux(&root.join("no-flux.sock"));
         let daemon = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/nyx-share-daemon");
         assert!(daemon.exists(), "build nyx-share-daemon first");
         let child = Command::new(daemon)
@@ -53,6 +57,42 @@ fn service() -> &'static Service {
         }
         Service { root, _child: child }
     })
+}
+
+/// Which Flux devices were sent text, in order.
+static FLUX_SENT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Two paired phones both called Pandora; the first refuses text.
+fn fake_flux(socket: &Path) {
+    let listener = UnixListener::bind(socket).unwrap();
+    std::thread::spawn(move || {
+        for conn in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut writer = conn.try_clone().unwrap();
+                for line in BufReader::new(conn).lines().map_while(Result::ok) {
+                    let req: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    let phone = |id: &str| serde_json::json!({ "id": id, "name": "Pandora", "type": "phone", "paired": true, "online": true, "plugins": ["share"] });
+                    let reply = match req["method"].as_str().unwrap() {
+                        "state" => {
+                            serde_json::json!({ "id": req["id"], "result": { "devices": [phone("p1"), phone("p2")], "transfers": [] } })
+                        }
+                        "share.text" => {
+                            let device = req["params"]["device"].as_str().unwrap().to_string();
+                            FLUX_SENT.lock().unwrap().push(device.clone());
+                            match device.as_str() {
+                                "p1" => {
+                                    serde_json::json!({ "id": req["id"], "error": { "code": "busy", "message": "p1 refused it" } })
+                                }
+                                _ => serde_json::json!({ "id": req["id"], "result": {} }),
+                            }
+                        }
+                        _ => serde_json::json!({ "id": req["id"], "result": {} }),
+                    };
+                    writeln!(writer, "{reply}").unwrap();
+                }
+            });
+        }
+    });
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -337,4 +377,38 @@ fn retries_failed_jobs_and_keeps_settings() {
     client.clear_history().unwrap();
     assert!(client.jobs().unwrap().iter().all(|j| !j.state.finished()));
     client.set_preferences(&PreferencesUpdate { history: Some(50), ..Default::default() }).unwrap();
+}
+
+#[test]
+#[ignore]
+fn linked_devices_fall_back_to_the_next_route() {
+    let client = Client::connect().unwrap();
+    let list = client.devices().unwrap();
+    let suggested = &list["suggestions"][0];
+    assert_eq!(suggested["name"], "Pandora", "{list}");
+    assert_eq!(suggested["routes"], serde_json::json!(["flux:p1", "flux:p2"]));
+
+    let bad = LinkedDevice { name: "Pandora".into(), routes: vec!["save".into(), "flux:p1".into()], ..Default::default() };
+    assert!(client.save_device(&bad).is_err(), "only devices link");
+    let device = LinkedDevice { name: "My phone".into(), routes: vec!["flux:p1".into(), "flux:p2".into()], ..Default::default() };
+    let id = client.save_device(&device).unwrap();
+    let dests = client.destinations(&[ContentKind::Text], 1).unwrap();
+    assert!(!dests.iter().any(|d| d.id.starts_with("flux:")), "the routes fold into the device");
+    let linked = dests.iter().find(|d| d.id == format!("device:{id}")).unwrap();
+    assert_eq!((linked.name.as_str(), linked.provider.as_str()), ("My phone", "devices"));
+    assert!(client.devices().unwrap()["suggestions"].as_array().unwrap().is_empty());
+
+    let mut content = Content::new();
+    content.text("hello");
+    let options = ShareOptions { notify: Some(false), ..Default::default() };
+    let mut steps = Vec::new();
+    let job = client.share_to(&linked.id, &content, &options).unwrap();
+    let done = client.wait(&job, |j| steps.extend(j.step.clone())).unwrap();
+    assert_eq!(done.state, JobState::Completed, "{:?}", done.message);
+    assert_eq!(*FLUX_SENT.lock().unwrap(), ["p1", "p2"]);
+    assert_eq!(done.destination_name, "My phone");
+
+    client.remove_device(&id).unwrap();
+    assert!(client.destinations(&[], 0).unwrap().iter().any(|d| d.id == "flux:p1"));
+    assert!(!std::fs::read_to_string(service().root.join("config/nyx-share/devices.toml")).unwrap().contains("flux:p1"));
 }

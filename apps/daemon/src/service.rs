@@ -221,6 +221,70 @@ impl Share1 {
         if self.0.cancel(id) { Ok(()) } else { Err(fdo::Error::UnknownObject(format!("There is no job {id}"))) }
     }
 
+    /// Linked devices and suggestions: `{"devices":[{id,name,routes}],
+    /// "suggestions":[{name,routes}],"routes":[{id,name,provider,status}]}`, the
+    /// last being every linkable destination present now.
+    fn list_devices(&self) -> String {
+        self.0.touch();
+        let devices = self.0.devices.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let all = self.0.routes();
+        let linkable: Vec<_> = all.iter().filter(|d| nyx_share_core::devices::LINKABLE.contains(&d.provider.as_str())).collect();
+        let suggestions: Vec<_> = nyx_share_core::devices::suggestions(&all, &devices)
+            .into_iter()
+            .map(|(name, routes)| serde_json::json!({ "name": name, "routes": routes }))
+            .collect();
+        let routes: Vec<_> = linkable
+            .iter()
+            .map(|d| serde_json::json!({ "id": d.id, "name": d.name, "provider": d.provider, "status": d.status }))
+            .collect();
+        serde_json::json!({ "devices": devices, "suggestions": suggestions, "routes": routes }).to_string()
+    }
+
+    /// Link routes into one device (empty `id` adds one); returns its id.
+    async fn save_device(&self, device: &str, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> fdo::Result<String> {
+        self.0.touch();
+        let mut d: nyx_share_core::LinkedDevice =
+            serde_json::from_str(device).map_err(|e| fdo::Error::InvalidArgs(format!("Not a device: {e}")))?;
+        d.name = d.name.trim().to_string();
+        d.routes.dedup();
+        d.validate().map_err(fdo::Error::InvalidArgs)?;
+        if d.id.is_empty() {
+            d.id = uuid::Uuid::new_v4().simple().to_string();
+        }
+        let list = {
+            let mut devices = self.0.devices.write().unwrap_or_else(|e| e.into_inner());
+            // A route belongs to one device at most.
+            for other in devices.iter_mut().filter(|o| o.id != d.id) {
+                other.routes.retain(|r| !d.routes.contains(r));
+            }
+            devices.retain(|o| o.id == d.id || o.routes.len() >= 2);
+            match devices.iter_mut().find(|o| o.id == d.id) {
+                Some(slot) => *slot = d.clone(),
+                None => devices.push(d.clone()),
+            }
+            devices.clone()
+        };
+        crate::devices::save(&list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))?;
+        let _ = Self::destinations_changed(&emitter).await;
+        Ok(d.id)
+    }
+
+    async fn remove_device(&self, id: &str, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>) -> fdo::Result<()> {
+        self.0.touch();
+        let list = {
+            let mut devices = self.0.devices.write().unwrap_or_else(|e| e.into_inner());
+            let before = devices.len();
+            devices.retain(|d| d.id != id);
+            if devices.len() == before {
+                return Err(fdo::Error::UnknownObject("No such device".into()));
+            }
+            devices.clone()
+        };
+        crate::devices::save(&list).map_err(|e| fdo::Error::Failed(format!("Couldn't save: {e}")))?;
+        let _ = Self::destinations_changed(&emitter).await;
+        Ok(())
+    }
+
     /// The arrangement and settings as JSON: order, pinned, hidden, disabled, default, history.
     fn get_preferences(&self) -> String {
         self.0.touch();

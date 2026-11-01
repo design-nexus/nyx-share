@@ -52,6 +52,12 @@ pub trait Share {
 
     fn get_preferences(&self) -> zbus::Result<String>;
 
+    fn list_devices(&self) -> zbus::Result<String>;
+
+    fn save_device(&self, device: &str) -> zbus::Result<String>;
+
+    fn remove_device(&self, id: &str) -> zbus::Result<()>;
+
     fn clear_history(&self) -> zbus::Result<()>;
 
     /// JSON [`nyx_share_core::PreferencesUpdate`]: the lists it contains replace the saved ones.
