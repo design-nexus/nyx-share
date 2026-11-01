@@ -178,7 +178,12 @@ mod tests {
     #[test]
     fn arranges_by_preferences() {
         let all = vec![dest("a", &[Text], None), dest("b", &[Text], None), dest("c", &[Text], None)];
-        let prefs = Preferences { order: vec!["c".into(), "a".into()], pinned: vec!["b".into()], hidden: vec!["a".into()] };
+        let prefs = Preferences {
+            order: vec!["c".into(), "a".into()],
+            pinned: vec!["b".into()],
+            hidden: vec!["a".into()],
+            ..Default::default()
+        };
         let out = arrange(all, &prefs);
         let ids: Vec<_> = out.iter().map(|d| d.id.as_str()).collect();
         assert_eq!(ids, ["c", "a", "b"]);
@@ -188,10 +193,23 @@ mod tests {
 
     #[test]
     fn partial_updates_keep_other_lists() {
-        let mut prefs = Preferences { order: vec!["a".into()], pinned: vec!["a".into()], hidden: vec![] };
+        let mut prefs = Preferences { order: vec!["a".into()], pinned: vec!["a".into()], hidden: vec![], ..Default::default() };
         prefs.merge(PreferencesUpdate { hidden: Some(vec!["b".into(), "b".into()]), ..Default::default() });
         assert_eq!(prefs.order, ["a"]);
         assert_eq!(prefs.pinned, ["a"]);
         assert_eq!(prefs.hidden, ["b"]);
+    }
+
+    #[test]
+    fn leaves_out_turned_off_providers_and_puts_the_default_first() {
+        let mut off = dest("off", &[Text], None);
+        off.provider = "gone".into();
+        let prefs = Preferences { disabled: vec!["gone".into()], default: Some("b".into()), ..Default::default() };
+        let out = arrange(vec![dest("a", &[Text], None), off, dest("b", &[Text], None)], &prefs);
+        assert_eq!(out.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+        assert!(out[0].default && !out[1].default);
+        let mut p = Preferences::default();
+        p.merge(PreferencesUpdate { history: Some(9000), default: Some(String::new()), ..Default::default() });
+        assert_eq!((p.history_limit(), p.default), (500, None));
     }
 }
