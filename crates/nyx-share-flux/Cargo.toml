@@ -10,7 +10,6 @@ repository.workspace = true
 [dependencies]
 nyx-share-core.workspace = true
 nyx-share-providers.workspace = true
-serde.workspace = true
+nyx-connect.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
-libc.workspace = true

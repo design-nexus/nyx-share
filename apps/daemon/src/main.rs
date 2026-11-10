@@ -4,6 +4,7 @@
 mod caller;
 mod config;
 mod devices;
+mod flux_in;
 mod items;
 mod launch;
 mod nas;
@@ -46,6 +47,7 @@ fn main() -> anyhow::Result<()> {
             .await
             .context("Couldn't take the Nyx Share bus name (is another copy running?)")?;
         state.attach(conn.clone());
+        let _flux = flux_in::start(&state);
         let nearby = state.clone();
         std::thread::spawn(move || nearby::start(nearby));
         loop {

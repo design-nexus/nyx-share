@@ -1,18 +1,21 @@
 //! Phones and tablets paired in Flux, as Share destinations. Flux's `fluxd`
-//! owns pairing and the connection; Share only asks it to send, over its
-//! socket of JSON lines (`{"id":1,"method":"share.url","params":{…}}`).
+//! owns pairing and the connection; Share only asks it to send, through
+//! Nyx Connect (`nyx-connect`), and follows what it receives ([`incoming`]).
 
+use nyx_connect::{Conn, Device, Error as FluxError, Event, Feature, Snapshot, Transfer, Watch};
 use nyx_share_core::{ContentKind, Destination, Recipient, Section};
 use nyx_share_providers::stage::Stage;
 use nyx_share_providers::{Data, Outcome, Payload, Provider, SendError, Task};
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+pub mod incoming;
+
+pub use nyx_connect::socket_path;
 
 pub const PREFIX: &str = "flux:";
 /// A text message through a phone paired in Flux.
@@ -29,145 +32,18 @@ const HAND_OVER: Duration = Duration::from_secs(15 * 60);
 /// A transfer Flux never lists is given up after this long.
 const LOST: Duration = Duration::from_secs(30);
 
-/// Where fluxd listens: `$FLUX_SOCKET`, else `$XDG_RUNTIME_DIR/flux/fluxd.sock`.
-pub fn socket_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("FLUX_SOCKET").filter(|p| !p.is_empty()) {
-        return path.into();
-    }
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        // SAFETY: getuid has no preconditions.
-        .unwrap_or_else(|| PathBuf::from(format!("/run/user/{}", unsafe { libc::getuid() })));
-    runtime.join("flux/fluxd.sock")
+/// Paired, and the device takes shares.
+fn usable(d: &Device) -> bool {
+    d.paired && d.has(Feature::Share)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct FluxError {
-    pub code: String,
-    pub message: String,
-}
-
-impl FluxError {
-    fn new(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.into(), message: message.into() }
-    }
-}
-
-/// One connection to fluxd. Replies are matched by id; events are skipped.
-pub struct Conn {
-    reader: BufReader<UnixStream>,
-    writer: UnixStream,
-    next: i64,
-}
-
-impl Conn {
-    pub fn open(path: &Path) -> Result<Self, FluxError> {
-        let stream = UnixStream::connect(path).map_err(|_| FluxError::new("no_flux", "Flux isn't running"))?;
-        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-        let reader = stream.try_clone().map_err(|e| FluxError::new("io", e.to_string()))?;
-        let conn = Self { reader: BufReader::new(reader), writer: stream, next: 1 };
-        conn.wait_at_most(Duration::from_secs(10));
-        Ok(conn)
-    }
-
-    pub fn wait_at_most(&self, timeout: Duration) {
-        let _ = self.writer.set_read_timeout(Some(timeout));
-    }
-
-    pub fn call(&mut self, method: &str, params: Value) -> Result<Value, FluxError> {
-        let id = self.next;
-        self.next += 1;
-        let line = format!("{}\n", json!({ "id": id, "method": method, "params": params }));
-        let lost = |e: std::io::Error| FluxError::new("io", format!("Lost the connection to Flux: {e}"));
-        self.writer.write_all(line.as_bytes()).map_err(lost)?;
-        loop {
-            let mut reply = String::new();
-            if self.reader.read_line(&mut reply).map_err(lost)? == 0 {
-                return Err(FluxError::new("io", "Flux closed the connection"));
-            }
-            let Ok(msg) = serde_json::from_str::<Value>(&reply) else { continue };
-            if msg.get("id").and_then(Value::as_i64) != Some(id) {
-                continue;
-            }
-            if let Some(e) = msg.get("error") {
-                return Err(FluxError::new(
-                    e.get("code").and_then(Value::as_str).unwrap_or("error"),
-                    e.get("message").and_then(Value::as_str).unwrap_or("Flux refused"),
-                ));
-            }
-            return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct Device {
-    pub id: String,
-    pub name: String,
-    #[serde(default, rename = "type")]
-    pub kind: String,
-    #[serde(default)]
-    pub paired: bool,
-    #[serde(default)]
-    pub online: bool,
-    #[serde(default)]
-    pub plugins: Vec<String>,
-    /// The latest message of each text conversation, once Flux has asked.
-    #[serde(default)]
-    pub conversations: Vec<Conversation>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-pub struct Conversation {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub address: String,
-    #[serde(default)]
-    pub addresses: Vec<String>,
-}
-
-impl Device {
-    /// Paired, and the device takes shares.
-    fn usable(&self) -> bool {
-        self.paired && self.plugins.iter().any(|p| p == "share")
-    }
-
-    /// Paired, and the phone sends text messages for this computer.
-    fn texts(&self) -> bool {
-        self.paired && self.plugins.iter().any(|p| p == "sms")
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-struct Transfer {
-    id: String,
-    #[serde(default)]
-    done: i64,
-    #[serde(default)]
-    state: String,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-impl Transfer {
-    fn finished(&self) -> bool {
-        matches!(self.state.as_str(), "done" | "failed" | "canceled")
-    }
-}
-
-#[derive(Default, Deserialize)]
-struct Snapshot {
-    #[serde(default)]
-    devices: Vec<Device>,
-    #[serde(default)]
-    transfers: Vec<Transfer>,
+/// Paired, and the phone sends text messages for this computer.
+fn texts(d: &Device) -> bool {
+    d.paired && d.has(Feature::Sms)
 }
 
 fn snapshot(conn: &mut Conn) -> Result<Snapshot, FluxError> {
-    let value = conn.call("state", json!({}))?;
-    serde_json::from_value(value).map_err(|e| FluxError::new("bad_reply", format!("Flux answered oddly: {e}")))
+    conn.state()
 }
 
 pub struct FluxProvider {
@@ -227,7 +103,7 @@ impl Provider for FluxProvider {
 
     fn destinations(&self) -> Vec<Destination> {
         let devices = self.devices();
-        let texts = devices.iter().filter(|d| d.texts()).map(|d| Destination {
+        let texts = devices.iter().filter(|d| texts(d)).map(|d| Destination {
             id: format!("{SMS_PREFIX}{}", d.id),
             provider: self.id().into(),
             name: "Text message".into(),
@@ -248,7 +124,7 @@ impl Provider for FluxProvider {
         let texts: Vec<Destination> = texts.collect();
         devices
             .into_iter()
-            .filter(Device::usable)
+            .filter(usable)
             .map(|d| Destination {
                 id: format!("{PREFIX}{}", d.id),
                 provider: self.id().into(),
@@ -350,7 +226,7 @@ impl Provider for FluxProvider {
             .flatten()
             .filter_map(|v| v.as_str().map(String::from))
             .collect();
-        let result = follow(&mut conn, &device, &ids, task);
+        let result = follow(&mut conn, &self.socket, &device, &ids, task);
         drop(stage);
         result.map(|waiting| Outcome {
             message: match waiting {
@@ -389,7 +265,7 @@ impl FluxProvider {
             .map_err(failed)?
             .devices
             .into_iter()
-            .find(|d| d.id == id && d.texts())
+            .find(|d| d.id == id && texts(d))
             .ok_or_else(|| SendError::failed("That phone doesn't send text messages through Flux any more"))?;
         if !device.online {
             return Err(SendError::failed(format!(
@@ -405,11 +281,9 @@ impl FluxProvider {
             .iter()
             .find(|c| c.address == to && !c.name.trim().is_empty())
             .map_or_else(|| to.to_string(), |c| c.name.clone());
-        conn.call("sms.send", json!({ "device": device.id, "addresses": [to], "body": body })).map_err(|e| {
-            match e.code.as_str() {
-                "unsupported" => SendError::failed(format!("{} can't send that text", device.name)),
-                _ => failed(e),
-            }
+        conn.call("sms.send", json!({ "device": device.id, "addresses": [to], "body": body })).map_err(|e| match e.kind {
+            nyx_connect::ErrorKind::Unsupported => SendError::failed(format!("{} can't send that text", device.name)),
+            _ => failed(e),
         })?;
         (task.progress)(body.len() as u64);
         Ok(Outcome { message: format!("{} is texting {who}", device.name), outputs: Vec::new() })
@@ -435,15 +309,53 @@ fn sent_message(items: &[Payload], device: &str) -> String {
 
 /// Follow Flux's transfers until they end, passing on progress. Returns how
 /// many still wait in the outbox for an offline device.
-fn follow(conn: &mut Conn, device: &Device, ids: &[String], task: &Task<'_>) -> Result<usize, SendError> {
+fn follow(
+    conn: &mut Conn,
+    socket: &std::path::Path,
+    device: &Device,
+    ids: &[String],
+    task: &Task<'_>,
+) -> Result<usize, SendError> {
+    let (tx, rx) = mpsc::channel();
+    let _watch = Watch::at(socket.to_path_buf(), move |e| {
+        let _ = tx.send(e);
+    });
     let mut reported: HashMap<String, i64> = HashMap::new();
+    let mut mine: Vec<Transfer> = Vec::new();
     let started = Instant::now();
     loop {
-        let state = snapshot(conn).map_err(|e| SendError::failed(e.message))?;
-        if !ids.iter().any(|id| state.transfers.iter().any(|t| &t.id == id)) && started.elapsed() > LOST {
-            return Err(SendError::failed("Flux lost track of the transfer"));
+        if task.cancelled() {
+            for t in mine.iter().filter(|t| !t.finished()) {
+                let _ = conn.call("transfer.cancel", json!({ "id": t.id }));
+            }
+            if mine.is_empty() {
+                for id in ids {
+                    let _ = conn.call("transfer.cancel", json!({ "id": id }));
+                }
+            }
+            return Err(SendError::Cancelled { outputs: Vec::new() });
         }
-        let mine: Vec<Transfer> = ids
+        let state = match rx.recv_timeout(Duration::from_millis(250)) {
+            Ok(Event::State(state)) => state,
+            Ok(Event::Unavailable(e)) => {
+                return Err(SendError::failed(format!("{e}. The files wait in Flux's outbox until it's back.")));
+            }
+            Ok(Event::Toast(_)) => continue,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if mine.is_empty() && started.elapsed() > LOST {
+                    return Err(SendError::failed("Flux lost track of the transfer"));
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Err(SendError::failed("Lost the connection to Flux")),
+        };
+        if !ids.iter().any(|id| state.transfers.iter().any(|t| &t.id == id)) {
+            if started.elapsed() > LOST {
+                return Err(SendError::failed("Flux lost track of the transfer"));
+            }
+            continue;
+        }
+        mine = ids
             .iter()
             .map(|id| {
                 state
@@ -454,12 +366,6 @@ fn follow(conn: &mut Conn, device: &Device, ids: &[String], task: &Task<'_>) -> 
                     .unwrap_or_else(|| Transfer { id: id.clone(), ..Default::default() })
             })
             .collect();
-        if task.cancelled() {
-            for t in mine.iter().filter(|t| !t.finished()) {
-                let _ = conn.call("transfer.cancel", json!({ "id": t.id }));
-            }
-            return Err(SendError::Cancelled { outputs: Vec::new() });
-        }
         for t in &mine {
             let before = reported.insert(t.id.clone(), t.done).unwrap_or(0);
             if t.done > before {
@@ -468,7 +374,7 @@ fn follow(conn: &mut Conn, device: &Device, ids: &[String], task: &Task<'_>) -> 
         }
         if let Some(t) = mine.iter().find(|t| t.state == "failed") {
             let done = mine.iter().filter(|t| t.state == "done").count();
-            let reason = t.error.clone().unwrap_or_else(|| "the transfer stopped".into());
+            let reason = if t.error.is_empty() { "the transfer stopped".to_string() } else { t.error.clone() };
             let message = match done {
                 0 => format!("Flux couldn't send to {}: {reason}", device.name),
                 n => format!("Flux couldn't send everything to {}: {reason}. {n} of {} files arrived.", device.name, mine.len()),
@@ -486,7 +392,6 @@ fn follow(conn: &mut Conn, device: &Device, ids: &[String], task: &Task<'_>) -> 
         if !online && pending == mine.iter().filter(|t| !t.finished()).count() {
             return Ok(pending);
         }
-        std::thread::sleep(Duration::from_millis(400));
     }
 }
 

@@ -3,7 +3,9 @@
 use super::*;
 use nyx_share_core::ItemInfo;
 use nyx_share_providers::SendOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -28,6 +30,28 @@ fn scratch(name: &str) -> PathBuf {
     dir
 }
 
+fn state_of(f: &mut Fake) -> Value {
+    f.states += 1;
+    let state = match (f.fail, f.finish_after) {
+        (true, _) => "failed",
+        (_, Some(n)) if f.states > n => "done",
+        (_, Some(_)) => "active",
+        (_, None) => "waiting",
+    };
+    let transfers: Vec<Value> = (0..f.received.len())
+        .map(|i| json!({ "id": format!("t{i}"), "dir": "out", "state": state, "done": if state == "done" { 5 } else { 2 }, "error": "the phone refused it" }))
+        .collect();
+    let plugins = if f.sms { json!(["share", "clipboard", "sms"]) } else { json!(["share", "clipboard"]) };
+    let conversations = json!([
+        { "thread": 1, "name": "Kari", "address": "+15550100123", "addresses": ["+15550100123"] },
+        { "thread": 2, "name": "Kari, Ola", "address": "+15550100123", "addresses": ["+15550100123", "+15550100456"] },
+        { "thread": 3, "name": "", "address": "+15550100789", "addresses": ["+15550100789"] }
+    ]);
+    json!({ "devices": [{ "id": "phone1", "name": "Pandora", "type": "phone", "paired": true, "online": f.online, "plugins": plugins, "conversations": conversations },
+                        { "id": "tv1", "name": "Living room", "type": "tv", "paired": true, "online": true, "plugins": ["clipboard"] }],
+            "transfers": transfers, "clipboard": [{ "id": "c1", "text": "never read", "dir": "in" }] })
+}
+
 fn serve(dir: &Path, fake: Arc<StdMutex<Fake>>) -> PathBuf {
     let socket = dir.join("fluxd.sock");
     let listener = UnixListener::bind(&socket).unwrap();
@@ -45,27 +69,20 @@ fn serve(dir: &Path, fake: Arc<StdMutex<Fake>>) -> PathBuf {
                     let mut f = fake.lock().unwrap();
                     f.calls.push((method.clone(), params.clone()));
                     let result = match method.as_str() {
-                        "state" => {
-                            f.states += 1;
-                            let state = match (f.fail, f.finish_after) {
-                                (true, _) => "failed",
-                                (_, Some(n)) if f.states > n => "done",
-                                (_, Some(_)) => "active",
-                                (_, None) => "waiting",
-                            };
-                            let transfers: Vec<Value> = (0..f.received.len())
-                                .map(|i| json!({ "id": format!("t{i}"), "state": state, "done": if state == "done" { 5 } else { 2 }, "error": "the phone refused it" }))
-                                .collect();
-                            let plugins =
-                                if f.sms { json!(["share", "clipboard", "sms"]) } else { json!(["share", "clipboard"]) };
-                            let conversations = json!([
-                                { "thread": 1, "name": "Kari", "address": "+15550100123", "addresses": ["+15550100123"] },
-                                { "thread": 2, "name": "Kari, Ola", "address": "+15550100123", "addresses": ["+15550100123", "+15550100456"] },
-                                { "thread": 3, "name": "", "address": "+15550100789", "addresses": ["+15550100789"] }
-                            ]);
-                            json!({ "devices": [{ "id": "phone1", "name": "Pandora", "type": "phone", "paired": true, "online": f.online, "plugins": plugins, "conversations": conversations },
-                                                { "id": "tv1", "name": "Living room", "type": "tv", "paired": true, "online": true, "plugins": ["clipboard"] }],
-                                    "transfers": transfers, "clipboard": { "secret": "never read" } })
+                        "state" => state_of(&mut f),
+                        "subscribe" => {
+                            // fluxd pushes the state after each change; the fake, every 50 ms.
+                            let (fake, mut push) = (fake.clone(), writer.try_clone().unwrap());
+                            std::thread::spawn(move || {
+                                loop {
+                                    std::thread::sleep(Duration::from_millis(50));
+                                    let data = state_of(&mut fake.lock().unwrap());
+                                    if writeln!(push, "{}", json!({ "event": "state", "data": data })).is_err() {
+                                        break;
+                                    }
+                                }
+                            });
+                            json!({})
                         }
                         "share.files" => {
                             for p in params["paths"].as_array().unwrap() {
@@ -83,7 +100,7 @@ fn serve(dir: &Path, fake: Arc<StdMutex<Fake>>) -> PathBuf {
                         _ => json!({}),
                     };
                     // An event before the reply, as fluxd may send to a subscriber.
-                    writeln!(writer, "{}", json!({ "event": "state", "data": {} })).unwrap();
+                    writeln!(writer, "{}", json!({ "event": "toast", "data": { "text": "Sent" } })).unwrap();
                     writeln!(writer, "{}", json!({ "id": id, "result": result })).unwrap();
                 }
             });

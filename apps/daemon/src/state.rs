@@ -90,6 +90,28 @@ impl Drop for Call<'_> {
     }
 }
 
+/// Files arriving from another device, from any transport (LocalSend, Flux).
+pub struct Receiving {
+    /// The job's id: LocalSend's session, or `flux-in:<transfer>`.
+    pub id: String,
+    /// The sender as a destination id (`localsend:<key>`, `flux:<device>`).
+    pub destination: String,
+    pub sender: String,
+    pub names: Vec<String>,
+    pub total: u64,
+    /// Tell the user when it ends (not when a sheet shows it, or the transport does).
+    pub notify: bool,
+    /// When it started (Unix seconds), for one that was caught up on later.
+    pub created: Option<i64>,
+}
+
+/// How a receive job ended.
+pub enum ReceiveEnd {
+    Completed,
+    Cancelled,
+    Failed(String),
+}
+
 /// Failed jobs keep their items this long, so they can be retried.
 const RETRY_FOR: Duration = Duration::from_secs(30 * 60);
 const RETRY_MAX: usize = 20;
@@ -249,7 +271,9 @@ impl State {
             e.cancel.store(true, Ordering::Relaxed);
             e.job.direction == Direction::Receive
         };
-        if receiving && let Some(n) = self.nearby() {
+        if receiving && id.starts_with(nyx_share_flux::incoming::JOB_PREFIX) {
+            let _ = nyx_share_flux::incoming::cancel(&nyx_share_flux::socket_path(), id);
+        } else if receiving && let Some(n) = self.nearby() {
             n.cancel_incoming(id);
         }
         true
@@ -528,30 +552,39 @@ impl State {
         self.touch();
     }
 
-    /// A nearby device's accepted offer becomes a receive job (id = session).
-    pub fn begin_receive(&self, offer: &Offer) {
+    /// Files arriving become a receive job.
+    pub fn begin_receive(&self, r: Receiving) {
         let t = now();
         let job = Job {
-            id: offer.session.clone(),
-            destination: format!("{}{}", nyx_share_localsend::PREFIX, offer.sender.fingerprint.to_ascii_uppercase()),
-            destination_name: offer.sender.alias.clone(),
+            id: r.id,
+            destination: r.destination,
+            destination_name: r.sender,
             direction: Direction::Receive,
             state: JobState::Running,
-            items: offer.files.len() as u32,
-            summary: summarize(offer.files.iter().map(|f| f.file_name.as_str())),
+            items: r.names.len() as u32,
+            summary: summarize(r.names.iter().map(String::as_str)),
             bytes_done: 0,
             step: None,
             retryable: false,
-            bytes_total: offer.total,
+            bytes_total: r.total,
             message: None,
             outputs: Vec::new(),
-            created: t,
+            created: r.created.unwrap_or(t),
             updated: t,
         };
-        let watched = lock(&self.incoming).get(&offer.session).is_some_and(|i| !i.dismissed);
-        self.add(job.clone(), Arc::new(AtomicBool::new(false)), !watched, Duration::ZERO);
+        self.add(job.clone(), Arc::new(AtomicBool::new(false)), r.notify, Duration::ZERO);
         self.emit(&job);
         self.touch();
+    }
+
+    /// Whether a receive job is listed (running or in the history).
+    pub fn has_job(&self, id: &str) -> bool {
+        lock(&self.jobs).iter().any(|e| e.job.id == id)
+    }
+
+    /// Bytes received so far, as the transport counts them.
+    pub fn receive_done(&self, id: &str, bytes: u64) {
+        self.update(id, false, |j| j.bytes_done = bytes);
     }
 
     pub fn receive_progress(&self, session: &str, bytes: u64) {
@@ -562,20 +595,19 @@ impl State {
         self.update(session, true, |j| j.outputs.push(path));
     }
 
-    pub fn end_receive(&self, session: &str, end: nyx_share_localsend::End) {
-        use nyx_share_localsend::End;
+    pub fn end_receive(&self, session: &str, end: ReceiveEnd) {
         let finished = self.update(session, true, |j| match end {
-            End::Completed => {
+            ReceiveEnd::Completed => {
                 j.state = JobState::Completed;
                 j.bytes_done = j.bytes_total;
                 let what = if j.items == 1 { "1 file".to_string() } else { format!("{} files", j.items) };
                 j.message = Some(format!("Received {what} from {}", j.destination_name));
             }
-            End::Cancelled => {
+            ReceiveEnd::Cancelled => {
                 j.state = JobState::Cancelled;
                 j.message = Some("Cancelled".into());
             }
-            End::Failed(reason) => {
+            ReceiveEnd::Failed(reason) => {
                 j.state = JobState::Failed;
                 j.message = Some(reason);
             }

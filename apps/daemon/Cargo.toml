@@ -18,6 +18,7 @@ nyx-share-providers.workspace = true
 nyx-share-localsend.workspace = true
 nyx-share-nas.workspace = true
 nyx-share-flux.workspace = true
+nyx-connect.workspace = true
 nyx-share-apps.workspace = true
 nyx-share-external.workspace = true
 anyhow.workspace = true

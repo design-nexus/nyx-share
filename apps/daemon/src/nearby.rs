@@ -315,7 +315,16 @@ impl Events for Bridge {
 
     fn started(&self, offer: &Offer) {
         if let Some(s) = self.0.upgrade() {
-            s.begin_receive(offer);
+            let watched = crate::state::lock(&s.incoming).get(&offer.session).is_some_and(|i| !i.dismissed);
+            s.begin_receive(crate::state::Receiving {
+                id: offer.session.clone(),
+                destination: format!("{}{}", nyx_share_localsend::PREFIX, offer.sender.fingerprint.to_ascii_uppercase()),
+                sender: offer.sender.alias.clone(),
+                names: offer.files.iter().map(|f| f.file_name.clone()).collect(),
+                total: offer.total,
+                notify: !watched,
+                created: None,
+            });
         }
     }
 
@@ -333,7 +342,14 @@ impl Events for Bridge {
 
     fn ended(&self, session: &str, end: End) {
         if let Some(s) = self.0.upgrade() {
-            s.end_receive(session, end);
+            s.end_receive(
+                session,
+                match end {
+                    End::Completed => crate::state::ReceiveEnd::Completed,
+                    End::Cancelled => crate::state::ReceiveEnd::Cancelled,
+                    End::Failed(reason) => crate::state::ReceiveEnd::Failed(reason),
+                },
+            );
         }
     }
 }
