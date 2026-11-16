@@ -185,6 +185,12 @@ impl External {
     }
 }
 
+/// NixOS keeps programs and their libraries in /nix/store, reached through the system
+/// profile; /bin holds only `sh`.
+fn nixos() -> bool {
+    Path::new("/run/current-system").exists() && Path::new("/nix/store").is_dir()
+}
+
 /// The sandbox: read-only system, the provider's folder at /provider, its own
 /// data at /data, nothing of the user's, a private network unless allowed.
 fn sandbox(bwrap: &Path, p: &Installed, data: &Path) -> Command {
@@ -193,23 +199,33 @@ fn sandbox(bwrap: &Path, p: &Installed, data: &Path) -> Command {
     if p.network {
         c.arg("--share-net");
     }
-    c.args(["--setenv", "PATH", "/usr/bin", "--setenv", "HOME", "/data", "--setenv", "LANG", "C.UTF-8"]);
+    let nix = nixos();
+    let path = if nix { "/run/current-system/sw/bin:/usr/bin:/bin" } else { "/usr/bin" };
+    c.args(["--setenv", "PATH", path, "--setenv", "HOME", "/data", "--setenv", "LANG", "C.UTF-8"]);
     c.args(["--ro-bind", "/usr", "/usr", "--ro-bind", "/etc", "/etc"]);
-    c.args([
-        "--symlink",
-        "usr/bin",
-        "/bin",
-        "--symlink",
-        "usr/bin",
-        "/sbin",
-        "--symlink",
-        "usr/lib",
-        "/lib",
-        "--symlink",
-        "usr/lib",
-        "/lib64",
-    ]);
+    if nix {
+        c.args(["--ro-bind", "/bin", "/bin"]);
+    } else {
+        c.args([
+            "--symlink",
+            "usr/bin",
+            "/bin",
+            "--symlink",
+            "usr/bin",
+            "/sbin",
+            "--symlink",
+            "usr/lib",
+            "/lib",
+            "--symlink",
+            "usr/lib",
+            "/lib64",
+        ]);
+    }
     c.args(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run"]);
+    // After /run's tmpfs, which would otherwise hide the system profile.
+    if nix {
+        c.args(["--ro-bind", "/nix/store", "/nix/store", "--ro-bind", "/run/current-system", "/run/current-system"]);
+    }
     c.arg("--bind").arg(data).arg("/data");
     c.arg("--ro-bind").arg(&p.dir).arg("/provider");
     c.args(["--chdir", "/data", "--"]);
