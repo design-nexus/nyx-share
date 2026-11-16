@@ -20,7 +20,7 @@ fn main() -> glib::ExitCode {
     nyx_core::app::init(nyx_core::app::App { slug: "nyx-share", name: "Share" });
     if std::env::var_os("GSK_RENDERER").is_none() {
         // SAFETY: single-threaded startup before GTK initializes
-        unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
+        unsafe { std::env::set_var("GSK_RENDERER", "gl") };
     }
     let id = std::env::var("NYX_SHARE_APP_ID").unwrap_or_else(|_| APP_ID.to_string());
     // Windows without an application, like dialogs, take their Wayland app ID from this.
