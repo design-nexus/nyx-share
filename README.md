@@ -62,6 +62,8 @@ destinations the Share Sheet offers, pinned, hidden and in what order.
 
 ## Install
 
+On NyxOS, Share comes with the system. On Omarchy:
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/design-nexus/nyx-share/main/install.sh | bash
 ```
